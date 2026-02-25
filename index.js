@@ -4,20 +4,23 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const app = express();
 const userRoutes = require('./routes/user.routes');
+const grupoRoutes = require('./routes/grupo.router');
+const miembroRoutes = require('./routes/miembro.routes');
 // Conectar a la base de datos
 connectDB();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000'],
+  origin: ['http://localhost:8080', 'http://localhost:4200', 'http://192.168.1.144:8080'],
   credentials: true,
 }));
-app.use(express.json());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rutas
 app.use('/api/users', userRoutes);
+app.use('/api/grupos', grupoRoutes);
+app.use('/api/miembros', miembroRoutes);
 
 // Iniciar el servidor
 app.listen(3000, () => console.log('Server online: http://localhost:3000'));
