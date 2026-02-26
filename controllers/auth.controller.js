@@ -3,20 +3,18 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 exports.registerUser = async (req, res) => {
-    const { username, email, password } = req.body;
+    const { username, password } = req.body;
 
     try {
-        // Check if user exists by username OR email
-        const existUser = await User.findOne({ $or: [{ username }, { email }] });
+        const existUser = await User.findOne({ username });
         if (existUser) {
             return res.status(400).json({
-                message: existUser.username === username ? 'Username already exists' : 'Email already exists'
+                message: 'Username already exists'
             });
         }
 
         const newUser = new User({
             username,
-            email,
             password,
             role: 'user'
         });
@@ -31,11 +29,11 @@ exports.registerUser = async (req, res) => {
 
 exports.loginController = async (req, res) => {
     try {
-        const { email, password } = req.body;
-        console.log('Login attempt for:', email);
-        const user = await User.findOne({ email });
+        const { username, password } = req.body;
+        console.log('Login attempt for:', username);
+        const user = await User.findOne({ username });
         if (!user) {
-            console.log('User not found:', email);
+            console.log('User not found:', username);
             return res.status(401).json({ message: 'Invalid credentials' });
         }
         const isMatch = await user.comparePassword(password);
