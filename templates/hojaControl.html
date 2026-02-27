@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th,
+        td {
+            border: 1px solid black;
+            padding: 4px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f0f0f0;
+        }
+
+        .atraso {
+            background-color: #ffcccc;
+        }
+
+        .pagado {
+            background-color: #ccffcc;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h2>Hoja de Control Grupal de Pagos</h2>
+        <p>Grupo: {{ grupo }}</p>
+        <p>Clave: {{ clave }} | Ciclo: {{ ciclo }}</p>
+        <p>Día visita: {{ diaVisita }} | Hora: {{ horaVisita }}</p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Rol</th>
+                {{ columnasFechas }}
+                <th>Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ filas }}
+        </tbody>
+    </table>
+</body>
+
+</html>

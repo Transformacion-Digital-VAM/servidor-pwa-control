@@ -20,24 +20,10 @@ const grupoSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    calendarioPagos: [
-        {
-            numeroPago: {
-                type: Number,
-                required: true
-            },
-            fechaProgramada: {
-                type: Date,
-                required: true
-            }
-        }
-    ],
-    integrantes: [
-        {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Miembro'
-        }
-    ]
+    cicloActual: {
+        type: Number,
+        required: true
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Grupo', grupoSchema);

@@ -41,7 +41,23 @@ exports.loginController = async (req, res) => {
         if (!isMatch) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
-        res.json({ message: 'Login successful' });
+
+        // Generate Token
+        const token = jwt.sign(
+            { id: user._id, username: user.username, role: user.role },
+            process.env.JWT_SECRET || 'VAM2026#00',
+            { expiresIn: '8h' }
+        );
+
+        res.json({
+            message: 'Login successful',
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                role: user.role
+            }
+        });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ message: 'Error logging in' });
