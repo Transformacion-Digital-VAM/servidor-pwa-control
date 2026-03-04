@@ -12,7 +12,7 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:4200', 'http://192.168.1.144:8080'],
+  origin: ['http://127.0.0.1:8080', 'http://localhost:4200'],
   credentials: true,
 }));
 app.use(express.json());
