@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 exports.registerUser = async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, role, coordinacion } = req.body;
 
     try {
         const existUser = await User.findOne({ username });
@@ -16,14 +16,15 @@ exports.registerUser = async (req, res) => {
         const newUser = new User({
             username,
             password,
-            role: 'user'
+            role: role || 'asesor',
+            coordinacion
         });
 
         await newUser.save();
         res.status(201).json({ message: 'User created successfully' });
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ message: 'Error creating user' });
+        res.status(500).json({ message: 'Error creating user', error });
     }
 }
 
@@ -44,7 +45,12 @@ exports.loginController = async (req, res) => {
 
         // Generate Token
         const token = jwt.sign(
-            { id: user._id, username: user.username, role: user.role },
+            {
+                id: user._id,
+                username: user.username,
+                role: user.role,
+                coordinacion: user.coordinacion
+            },
             process.env.JWT_SECRET || 'VAM2026#00',
             { expiresIn: '8h' }
         );
@@ -55,7 +61,8 @@ exports.loginController = async (req, res) => {
             user: {
                 id: user._id,
                 username: user.username,
-                role: user.role
+                role: user.role,
+                coordinacion: user.coordinacion
             }
         });
     } catch (error) {
