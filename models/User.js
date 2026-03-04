@@ -14,8 +14,15 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'user'],
-    default: 'user'
+    enum: ['admin', 'asesor', 'coordinador'],
+    default: 'asesor'
+  },
+  coordinacion: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Coordinacion',
+    required: function () {
+      return this.role === 'asesor' || this.role === 'coordinador';
+    }
   }
 });
 

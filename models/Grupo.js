@@ -23,6 +23,19 @@ const grupoSchema = new mongoose.Schema({
     cicloActual: {
         type: Number,
         required: true
+    },
+    integrantes: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Miembro'
+    }],
+    coordinacion: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Coordinacion'
+    },
+    asesor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     }
 }, { timestamps: true });
 
