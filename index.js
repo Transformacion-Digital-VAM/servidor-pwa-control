@@ -6,6 +6,7 @@ const app = express();
 const userRoutes = require('./routes/user.routes');
 const grupoRoutes = require('./routes/grupo.router');
 const miembroRoutes = require('./routes/miembro.routes');
+const clienteRoutes = require('./routes/cliente.router');
 const creditoRoutes = require('./routes/credito.router');
 // Conectar a la base de datos
 connectDB();
@@ -22,6 +23,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/users', userRoutes);
 app.use('/api/grupos', grupoRoutes);
 app.use('/api/miembros', miembroRoutes);
+app.use('/api/clientes', clienteRoutes);
 app.use('/api/creditos', creditoRoutes);
 
 // Iniciar el servidor

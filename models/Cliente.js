@@ -1,29 +1,15 @@
 const mongoose = require('mongoose');
 
-const grupoSchema = new mongoose.Schema({
+const clienteSchema = new mongoose.Schema({
     nombre: {
         type: String,
         required: true,
         trim: true
     },
-    clave: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true
-    },
-    diaVisita: {
+    diaPago: {
         type: String,
         required: true
     },
-    horaVisita: {
-        type: String,
-        required: true
-    },
-    integrantes: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Miembro'
-    }],
     coordinacion: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Coordinacion'
@@ -35,4 +21,4 @@ const grupoSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Grupo', grupoSchema);
+module.exports = mongoose.model('Cliente', clienteSchema);

@@ -64,6 +64,34 @@ exports.getGrupoById = async (req, res) => {
     }
 }
 
+exports.getGruposPorCoordinacion = async (req, res) => {
+    try {
+        const { coordinacion } = req.params;
+        const grupos = await Grupo.find({ coordinacion: coordinacion })
+            .populate('asesor', 'username')
+            .populate('coordinacion', 'nombre')
+            .populate('integrantes');
+
+        res.status(200).json(grupos);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+}
+
+exports.getGruposPorAsesor = async (req, res) => {
+    try {
+        const { asesor } = req.params;
+        const grupos = await Grupo.find({ asesor: asesor })
+            .populate('asesor', 'username')
+            .populate('coordinacion', 'nombre')
+            .populate('integrantes');
+
+        res.status(200).json(grupos);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+}
+
 exports.updateGrupo = async (req, res) => {
     try {
         // Solo el Admin puede editar grupos
