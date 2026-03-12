@@ -1,16 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const creditoController = require('../controllers/credito.controller');
+const hcontrolController = require('../controllers/hcontrol.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
-router.post('/', verifyToken, creditoController.crearCredito);
-router.get('/', verifyToken, creditoController.obtenerCreditos);
-router.get('/:id', verifyToken, creditoController.obtenerCreditoPorId);
-router.put('/:id', verifyToken, creditoController.actualizarCredito);
-router.delete('/:id', verifyToken, creditoController.eliminarCredito);
+router.post('/', creditoController.crearCredito); //verifyToken
+router.get('/', creditoController.obtenerCreditos); //verifyToken
+router.get('/:id', creditoController.obtenerCreditoPorId); //verifyToken
+router.put('/:id', creditoController.actualizarCredito); //verifyToken
+router.delete('/:id', creditoController.eliminarCredito); //verifyToken
 
 // PAGOS
-router.post('/:id/pagos', verifyToken, creditoController.registrarPago);
+router.post('/:id/pagos', creditoController.registrarPago); //verifyToken
+router.post('/:id/garantia', creditoController.registrarAbonoGarantia); //verifyToken
 
-router.get('/hoja-control/:grupoId/:ciclo', verifyToken, creditoController.hojaControl);
+
+//GARANTIAS
+//router.post('/:id/garantia', creditoController.registrarGarantia); //verifyToken
+
+
+//AHORRO
+router.post('/:id/ahorro', creditoController.registrarAhorro); //verifyToken
+
+
+//Hoja de control
+router.get('/hoja-control/:grupoId/:ciclo', hcontrolController.generarHojaControlGrupal); //verifyToken
 module.exports = router;

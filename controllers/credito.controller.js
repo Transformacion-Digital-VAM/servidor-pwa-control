@@ -1,31 +1,61 @@
 const Credito = require('../models/Credito');
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
+
+
+/** 
+ * CRUD DE CREDITOS
+ */
 // CREATE
 exports.crearCredito = async (req, res) => {
     try {
         const {
             miembro,
+            cliente,
             ciclo,
             tipoCredito,
             pagoPactado,
+            semanas,
+            garantia,
+            ahorro,
             fechaPrimerPago
         } = req.body;
 
-        // Validar semanas según tipo
-        const semanas = tipoCredito === '8S' ? 8 : 16;
+        // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
+        if (tipoCredito === 'Individual') {
+            if (!cliente) {
+                return res.status(400).json({ ok: false, msg: 'Para un crédito Individual debe seleccionar un Cliente' });
+            }
+            // Limpiamos miembro por seguridad si venía algo
+            req.body.miembro = null;
+        } else {
+            // Si es CC, R o 8S (Grupales)
+            if (!miembro) {
+                return res.status(400).json({ ok: false, msg: 'Para este tipo de crédito debe seleccionar un Miembro del grupo' });
+            }
+            // Limpiamos cliente por seguridad
+            req.body.cliente = null;
+        }
 
-        const saldoTotal = pagoPactado * semanas;
+        // Validar semanas
+        const numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
+        const saldoTotal = pagoPactado * numSemanas;
 
         const nuevoCredito = new Credito({
-            miembro,
+            miembro: tipoCredito !== 'Individual' ? miembro : null,
+            cliente: tipoCredito === 'Individual' ? cliente : null,
             ciclo,
             tipoCredito,
-            semanas,
+            semanas: numSemanas,
             pagoPactado,
             saldoTotal,
-            fechaPrimerPago,
             saldoPendiente: saldoTotal,
+            garantia,
+            ahorro: {
+                montoTotal: ahorro,
+                pagosAhorro: []
+            },
+            fechaPrimerPago,
             pagos: []
         });
 
@@ -176,65 +206,79 @@ exports.eliminarCredito = async (req, res) => {
 // REGISTRAR PAGO
 exports.registrarPago = async (req, res) => {
     try {
-        const { id } = req.params; // id del credito
-        const { montoPagado, fechaPago, pagoSolidario } = req.body;
+        const { id } = req.params; // ID del crédito desde el cual se registra el pago (contexto del que paga)
+        const { montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId } = req.body;
 
-        const credito = await Credito.findById(id);
-
-        if (!credito) {
-            return res.status(404).json({
-                ok: false,
-                msg: 'Crédito no encontrado'
-            });
+        // 1. Obtener el crédito de quien está físicamente entregando el dinero (el que está en la URL)
+        const creditoOrigen = await Credito.findById(id);
+        if (!creditoOrigen) {
+            return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
         }
 
-        if (credito.estado === 'Liquidado') {
-            return res.status(400).json({
-                ok: false,
-                msg: 'El crédito ya está liquidado'
-            });
+        let creditoDestino;
+
+        if (pagoSolidario) {
+            // Caso Solidario: El dinero se abona al crédito del beneficiario (enviado como 'miembro' en el body)
+            if (!beneficiarioId) {
+                return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro)' });
+            }
+
+            // Buscamos el crédito activo del beneficiario
+            creditoDestino = await Credito.findOne({ miembro: beneficiarioId, estado: 'Activo' });
+
+            if (!creditoDestino) {
+                return res.status(404).json({ ok: false, msg: 'No se encontró un crédito activo para el beneficiario seleccionado' });
+            }
+        } else {
+            // Caso Normal: El dinero se abona al mismo crédito
+            creditoDestino = creditoOrigen;
+        }
+
+        // --- VALIDACIONES DE ESTADO Y MONTOS ---
+        if (creditoDestino.estado === 'Liquidado') {
+            return res.status(400).json({ ok: false, msg: 'El crédito de destino ya está liquidado' });
         }
 
         if (montoPagado <= 0) {
-            return res.status(400).json({
-                ok: false,
-                msg: 'El monto debe ser mayor a 0'
-            });
+            return res.status(400).json({ ok: false, msg: 'El monto debe ser mayor a 0' });
         }
 
-        if (montoPagado > credito.saldoPendiente) {
-            return res.status(400).json({
-                ok: false,
-                msg: 'El monto excede el saldo pendiente'
-            });
+        if (montoPagado > creditoDestino.saldoPendiente) {
+            return res.status(400).json({ ok: false, msg: `El monto excede el saldo pendiente (${creditoDestino.saldoPendiente})` });
         }
 
-        const numeroPago = credito.pagos.length + 1;
+        // --- CREACIÓN DEL REGISTRO DE PAGO ---
+        const numeroPago = creditoDestino.pagos.length + 1;
 
         const nuevoPago = {
             numeroPago,
             montoPagado,
             fechaPago: fechaPago || new Date(),
-            pagoSolidario: pagoSolidario || false
+            pagoSolidario: pagoSolidario || false,
+            // 'miembro' en el subdocumento Pago siempre es el dueño de la DEUDA (el beneficiario)
+            miembro: creditoDestino.miembro,
+            // 'quienPrestoSolidario' es la persona de la URL (quien puso el dinero)
+            quienPrestoSolidario: pagoSolidario ? creditoOrigen.miembro : undefined
         };
 
-        // Agregar pago
-        credito.pagos.push(nuevoPago);
+        // Agregar pago al crédito de destino
+        creditoDestino.pagos.push(nuevoPago);
 
-        // Restar saldo
-        credito.saldoPendiente -= montoPagado;
+        // Restar saldo al crédito de destino
+        creditoDestino.saldoPendiente -= montoPagado;
 
-        // Verificar si ya se liquidó
-        if (credito.saldoPendiente === 0) {
-            credito.estado = 'Liquidado';
+        // Verificar si se liquidó el crédito de destino
+        if (creditoDestino.saldoPendiente <= 0) {
+            creditoDestino.saldoPendiente = 0;
+            creditoDestino.estado = 'Liquidado';
         }
 
-        await credito.save();
+        await creditoDestino.save();
 
         res.json({
             ok: true,
-            msg: 'Pago registrado correctamente',
-            credito
+            msg: pagoSolidario ? 'Pago solidario aplicado al beneficiario' : 'Pago registrado correctamente',
+            credito: creditoDestino
         });
 
     } catch (error) {
@@ -246,6 +290,51 @@ exports.registrarPago = async (req, res) => {
     }
 };
 
+
+// REGISTRAR ABONO A GARANTÍA
+exports.registrarAbonoGarantia = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { monto, fecha } = req.body;
+
+        const credito = await Credito.findById(id);
+
+        if (!credito) {
+            return res.status(404).json({
+                ok: false,
+                msg: 'Crédito no encontrado'
+            });
+        }
+
+        if (monto <= 0) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'El monto debe ser mayor a 0'
+            });
+        }
+
+        // Agregar pago a la lista de garantía
+        credito.garantia.pagos.push({
+            monto,
+            fecha: fecha || new Date()
+        });
+
+        await credito.save();
+
+        res.json({
+            ok: true,
+            msg: 'Abono a garantía registrado correctamente',
+            credito
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            msg: 'Error al registrar abono a garantía',
+            error: error.message
+        });
+    }
+};
 
 // helper interno
 function generarCalendarioPagos(fechaPrimerPago, semanas) {
@@ -265,86 +354,99 @@ function generarCalendarioPagos(fechaPrimerPago, semanas) {
     return fechas;
 }
 
-exports.hojaControl = async (req, res) => {
-    try {
-        const { grupoId, ciclo } = req.params;
+/*
+* Garantias
+*/
 
-        const grupo = await Grupo.findById(grupoId);
-        if (!grupo) {
+// exports.registrarGarantia = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { monto, fecha } = req.body;
+
+//         const credito = await Credito.findById(id);
+
+//         if (!credito) {
+//             return res.status(404).json({
+//                 ok: false,
+//                 msg: 'Crédito no encontrado'
+//             });
+//         }
+
+//         if (monto <= 0) {
+//             return res.status(400).json({
+//                 ok: false,
+//                 msg: 'El monto debe ser mayor a 0'
+//             });
+//         }
+
+//         // Agregar pago a la lista de garantía
+//         credito.garantia.pagos.push({
+//             monto,
+//             fecha: fecha || new Date()
+//         });
+
+//         await credito.save();
+
+//         res.json({
+//             ok: true,
+//             msg: 'Garantía registrada correctamente',
+//             credito
+//         });
+
+//     } catch (error) {
+//         res.status(500).json({
+//             ok: false,
+//             msg: 'Error al registrar garantía',
+//             error: error.message
+//         });
+//     }
+// };
+
+/*
+* Ahorro
+*/
+exports.registrarAhorro = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { monto, fecha } = req.body;
+
+        const credito = await Credito.findById(id);
+
+        if (!credito) {
             return res.status(404).json({
                 ok: false,
-                msg: 'Grupo no encontrado'
+                msg: 'Crédito no encontrado'
             });
         }
 
-        const miembros = await Miembro.find({ grupo: grupoId });
+        if (monto <= 0) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'El monto debe ser mayor a 0'
+            });
+        }
 
-        // 🔥 OPTIMIZACIÓN: traemos todos los créditos de una sola vez
-        const creditos = await Credito.find({
-            ciclo: Number(ciclo),
-            miembro: { $in: miembros.map(m => m._id) }
+        // Agregar pago a la lista de ahorro
+        credito.ahorro.pagosAhorro.push({
+            monto,
+            fecha: fecha || new Date()
         });
 
-        const hoy = new Date();
-        const reporteMiembros = [];
+        // Actualizar el monto total sumando todos los pagos
+        credito.ahorro.montoTotal = credito.ahorro.pagosAhorro.reduce((total, p) => total + p.monto, 0);
 
-        for (const credito of creditos) {
-
-            const miembro = miembros.find(
-                m => m._id.toString() === credito.miembro.toString()
-            );
-
-            const calendario = generarCalendarioPagos(
-                credito.fechaPrimerPago,
-                credito.semanas
-            );
-
-            const pagosConCalendario = calendario.map(fecha => {
-                const pagoReal = credito.pagos.find(
-                    p => p.numeroPago === fecha.numeroPago
-                );
-
-                const pagado = !!pagoReal;
-
-                const atraso =
-                    !pagado &&
-                    fecha.fechaProgramada < hoy;
-
-                return {
-                    numeroPago: fecha.numeroPago,
-                    fechaProgramada: fecha.fechaProgramada,
-                    montoPagado: pagado ? pagoReal.montoPagado : 0,
-                    pagado,
-                    atraso
-                };
-            });
-
-            reporteMiembros.push({
-                nombre: `${miembro.nombre} ${miembro.apellidos}`,
-                rol: miembro.rol,
-                tipoCredito: credito.tipoCredito,
-                pagoPactado: credito.pagoPactado,
-                semanas: credito.semanas,
-                calendarioPagos: pagosConCalendario,
-                saldoPendiente: credito.saldoPendiente,
-                estado: credito.estado
-            });
-        }
+        await credito.save();
 
         res.json({
             ok: true,
-            grupo: grupo.nombre,
-            clave: grupo.clave,
-            ciclo: Number(ciclo),
-            diaVisita: grupo.diaVisita,
-            horaVisita: grupo.horaVisita,
-            miembros: reporteMiembros
+            msg: 'Ahorro registrado correctamente',
+            credito
         });
 
     } catch (error) {
         res.status(500).json({
             ok: false,
-            msg: 'Error al generar hoja de control',
+            msg: 'Error al registrar ahorro',
             error: error.message
         });
     }

@@ -4,23 +4,23 @@ const creditoSchema = new mongoose.Schema({
     miembro: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Miembro',
-        required: true
+        required: false
     },
-
-    ciclo: { type: Number, required: true },
-
+    cliente: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Cliente',
+        required: false
+    },
+    ciclo: { type: Number, required: false },
     tipoCredito: {
         type: String,
-        enum: ['CC', 'R', '8S'],
+        enum: ['CC', 'R', '8S', 'Individual'],
         required: true
     },
-
     semanas: { type: Number, required: true }, // 8 o 16
     pagoPactado: { type: Number, required: true },
-
     saldoTotal: { type: Number, required: true },
     saldoPendiente: { type: Number, required: true },
-
     estado: {
         type: String,
         enum: ['Activo', 'Liquidado'],
@@ -28,11 +28,34 @@ const creditoSchema = new mongoose.Schema({
     },
     fechaPrimerPago: { type: Date, required: true },
     pagos: [{
-        numeroPago: Number,
-        montoPagado: Number,
-        fechaPago: Date,
-        pagoSolidario: Boolean
-    }]
+        numeroPago: { type: Number, required: true },
+        montoPagado: { type: Number, required: true },
+        fechaPago: { type: Date, default: Date.now },
+        pagoSolidario: { type: Boolean, default: false },
+        miembro: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Miembro',
+            required: true
+        },
+        quienPrestoSolidario: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Miembro',
+            required: function () {
+                return this.pagoSolidario === true;
+            }
+        }
+    }],
+    garantia: {
+        type: Number,
+        required: true
+    },
+    ahorro: {
+        montoTotal: { type: Number, required: false },
+        pagosAhorro: [{
+            monto: { type: Number },
+            fecha: { type: Date, default: Date.now }
+        }]
+    }
 
 }, { timestamps: true });
 
