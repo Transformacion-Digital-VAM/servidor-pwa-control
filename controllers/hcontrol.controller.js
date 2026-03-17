@@ -100,12 +100,17 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     <table>
                         <thead>
                             <tr>
-                                <th>NO.</th>
-                                <th>NOMBRE DEL CLIENTE</th>
-                                <th>PAGO PACTADO</th>
-                                <th>SEM ${noPagos}</th>
-                                <th>SALDO FINAL</th>
-                            </tr>
+                                <th ROWSPAN="2">NO.</th>
+                                <th ROWSPAN="2">TIPO DE CRÉDITO</th>
+                                <th ROWSPAN="2">NOMBRE DEL CLIENTE</th>
+                                <th ROWSPAN="2">PAGO PACTADO</th>
+                                <th ROWSPAN="2">SEM ${noPagos}</th>
+                                <th ROWSPAN="2">S.F</th>
+                                </tr>
+                                <tr> 
+                                    <td>${calendario[0].fecha}</td>
+                                    <td>${calendario[noPagos - 1].fecha}</td>
+                                </tr>
                         </thead>
                         <tbody>
                             ${tablaHtml}
