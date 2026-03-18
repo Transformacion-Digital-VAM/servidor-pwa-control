@@ -215,6 +215,44 @@ exports.registrarPago = async (req, res) => {
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
         }
 
+        // --- MANEJO DE CRÉDITO INDIVIDUAL ---
+        if (creditoOrigen.tipoCredito === 'Individual') {
+            if (creditoOrigen.estado === 'Liquidado') {
+                return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
+            }
+            if (montoPagado <= 0) {
+                return res.status(400).json({ ok: false, msg: 'El monto debe ser mayor a 0' });
+            }
+            if (montoPagado > creditoOrigen.saldoPendiente) {
+                return res.status(400).json({ ok: false, msg: `El monto excede el saldo pendiente (${creditoOrigen.saldoPendiente})` });
+            }
+
+            const numeroPago = creditoOrigen.pagos.length + 1;
+            const nuevoPago = {
+                numeroPago,
+                montoPagado,
+                fechaPago: fechaPago || new Date(),
+                pagoSolidario: false
+            };
+
+            creditoOrigen.pagos.push(nuevoPago);
+            creditoOrigen.saldoPendiente -= montoPagado;
+
+            if (creditoOrigen.saldoPendiente <= 0) {
+                creditoOrigen.saldoPendiente = 0;
+                creditoOrigen.estado = 'Liquidado';
+            }
+
+            await creditoOrigen.save();
+
+            return res.json({
+                ok: true,
+                msg: 'Pago registrado correctamente (Individual)',
+                credito: creditoOrigen
+            });
+        }
+        // --- FIN DE MANEJO DE CRÉDITO INDIVIDUAL ---
+
         let creditoDestino;
 
         if (pagoSolidario) {

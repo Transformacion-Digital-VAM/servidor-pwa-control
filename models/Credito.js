@@ -35,7 +35,7 @@ const creditoSchema = new mongoose.Schema({
         miembro: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Miembro',
-            required: true
+            required: false
         },
         quienPrestoSolidario: {
             type: mongoose.Schema.Types.ObjectId,

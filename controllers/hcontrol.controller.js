@@ -66,6 +66,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             const grupoNombre = credito.miembro?.grupo?.nombre || "INDIVIDUAL";
             const noPagos = credito.semanas;
+            const tipoCredito = credito.tipoCredito;
             const pagoSemanal = credito.pagoPactado;
             const saldoTotal = credito.saldoTotal;
             const garantiaMonto = credito.garantia?.montoTotal || 0;
@@ -100,12 +101,16 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     <table>
                         <thead>
                             <tr>
-                                <th>NO.</th>
-                                <th>NOMBRE DEL CLIENTE</th>
-                                <th>PAGO PACTADO</th>
-                                <th>SEM ${noPagos}</th>
-                                <th>SALDO FINAL</th>
-                            </tr>
+                                <th ROWSPAN="2">NO.</th>
+                                <th ROWSPAN="2">TIPO DE CRÉDITO</th>
+                                <th ROWSPAN="2">NOMBRE DEL CLIENTE</th>
+                                <th ROWSPAN="2">PAGO PACTADO</th>
+                                <th ROWSPAN="2">SEM ${noPagos}</th>
+                                <th ROWSPAN="2">S.F</th>
+                                </tr>
+                                <tr> 
+                                    ${tipoCredito}
+                                </tr>
                         </thead>
                         <tbody>
                             ${tablaHtml}
