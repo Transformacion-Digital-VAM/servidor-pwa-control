@@ -46,6 +46,7 @@ exports.obtenerAsesores = async (req, res) => {
         const asesores = await User.find({ role: 'asesor' }, {
             username: 1,
             coordinacion: 1,
+            lastLocation: 1,
         });
 
         res.json(asesores);
@@ -61,6 +62,7 @@ exports.obtenerAsesoresCoordinacion = async (req, res) => {
         const asesores = await User.find({ role: 'asesor', coordinacion }, {
             username: 1,
             coordinacion: 1,
+            lastLocation: 1,
         });
 
         res.json(asesores);

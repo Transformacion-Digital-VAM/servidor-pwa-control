@@ -70,3 +70,31 @@ exports.loginController = async (req, res) => {
         res.status(500).json({ message: 'Error logging in' });
     }
 };
+
+exports.updateLocation = async (req, res) => {
+    try {
+        const { lat, lng, timestamp } = req.body;
+        
+        if (!lat || !lng) {
+            return res.status(400).json({ message: 'Latitiud y longitud son requeridas' });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        }
+
+        user.lastLocation = {
+            lat,
+            lng,
+            timestamp: timestamp || new Date()
+        };
+
+        await user.save();
+        
+        res.status(200).json({ message: 'Ubicación actualizada correctamente', location: user.lastLocation });
+    } catch (error) {
+        console.error('Error updating location:', error);
+        res.status(500).json({ message: 'Error al actualizar ubicación', error });
+    }
+};

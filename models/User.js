@@ -23,6 +23,11 @@ const userSchema = new mongoose.Schema({
     required: function () {
       return this.role === 'asesor' || this.role === 'coordinador';
     }
+  },
+  lastLocation: {
+    lat: { type: Number },
+    lng: { type: Number },
+    timestamp: { type: Date }
   }
 });
 

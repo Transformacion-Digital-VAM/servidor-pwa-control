@@ -47,7 +47,7 @@ const creditoSchema = new mongoose.Schema({
     }],
     garantia: {
         type: Number,
-        required: true
+        default: 0
     },
     ahorro: {
         montoTotal: { type: Number, required: false },
