@@ -25,4 +25,5 @@ router.post('/:id/ahorro', creditoController.registrarAhorro); //verifyToken
 
 //Hoja de control
 router.get('/hoja-control/:grupoId/:ciclo', hcontrolController.generarHojaControlGrupal); //verifyToken
+router.get('/hoja-control-individual/:clienteId/:ciclo', hcontrolController.generarHojaControlIndividual); //verifyToken
 module.exports = router;

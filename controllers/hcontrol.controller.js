@@ -5,6 +5,23 @@ const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 
+// Instancia global de Puppeteer para reutilización
+let _browser;
+const getBrowser = async () => {
+    if (!_browser || !_browser.connected) {
+        _browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
+        });
+    }
+    return _browser;
+};
+
 exports.generarHojaControlGrupal = async (req, res) => {
     const { grupoId, ciclo } = req.params;
 
@@ -42,129 +59,506 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const generarCalendario = (fechaInicio, semanas) => {
             const fechas = [];
             const base = new Date(fechaInicio);
+            // Compensar desfase de zona horaria para evitar error de un día atrás
+            base.setMinutes(base.getMinutes() + base.getTimezoneOffset());
+
             for (let i = 0; i < semanas; i++) {
                 const nueva = new Date(base);
                 nueva.setDate(base.getDate() + i * 7);
                 fechas.push({
                     numero: i + 1,
-                    fecha: nueva.toLocaleDateString('es-MX')
+                    fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
                 });
             }
             return fechas;
         };
 
-        // 4. GENERAR CONTENIDO HTML PARA CADA CRÉDITO
-        let paginasHtml = '';
+        // 4. GENERAR TABLA PRINCIPAL AL ESTILO DE LA IMAGEN
+        let sumaPagoPactado = 0;
+        let sumaSaldoTotal = 0;
+        let maxSemanas = 16;
+        if(creditos.length > 0 && creditos[0].semanas) {
+            maxSemanas = creditos[0].semanas;
+        }
 
-        for (let i = 0; i < creditos.length; i++) {
-            const credito = creditos[i];
+        const llena = req.query.llena === 'true';
+        const sumasSemanalesMod = new Array(maxSemanas).fill(0);
+        
+        const fechaBasica = creditos.length > 0 ? creditos[0].fechaPrimerPago : new Date();
+        const calendario = generarCalendario(fechaBasica, maxSemanas);
+
+        let tablaThead = `<tr>
+            <th rowspan="2" width="2%">NO.</th>
+            <th rowspan="2" width="4%" style="font-size:9px;">TIPO DE<br>CRÉDITO</th>
+            <th rowspan="2" width="14%">NOMBRE DEL<br>CLIENTE</th>
+            <th rowspan="2" width="7%">PAGO<br>PACTADO</th>`;
+        
+        calendario.forEach(p => {
+             tablaThead += `<th width="4%" style="font-size:9px;">SEM ${p.numero}</th>`;
+        });
+        tablaThead += `<th rowspan="2" width="4%">S.F.</th></tr><tr>`;
+        calendario.forEach(p => {
+             tablaThead += `<th style="font-size: 8px;">${p.fecha}</th>`;
+        });
+        tablaThead += `</tr>`;
+
+        let tablaTbody = '';
+        
+        creditos.forEach((credito, index) => {
             const nombreCliente = credito.cliente
                 ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
                 : credito.miembro
                     ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
                     : "N/A";
+            
+            const tipoCredito = credito.tipoCredito || "C.C.";
+            const pagoPactado = credito.pagoPactado || 0;
+            const saldoTotal = credito.saldoTotal || 0;
+            
+            sumaPagoPactado += pagoPactado;
+            sumaSaldoTotal += saldoTotal;
 
-            const grupoNombre = credito.miembro?.grupo?.nombre || "INDIVIDUAL";
-            const noPagos = credito.semanas;
-            const tipoCredito = credito.tipoCredito;
-            const pagoSemanal = credito.pagoPactado;
-            const saldoTotal = credito.saldoTotal;
-            const garantiaMonto = credito.garantia?.montoTotal || 0;
-
-            const calendario = generarCalendario(credito.fechaPrimerPago, noPagos);
-            let saldoInicial = saldoTotal;
-
-            const tablaHtml = calendario.map(p => {
-                const saldoFinal = saldoInicial - pagoSemanal;
-                const fila = `
-                    <tr>
-                        <td>${p.numero}</td>
-                        <td>${p.fecha}</td>
-                        <td>$${formatoMoneda(saldoInicial)}</td>
-                        <td>$${formatoMoneda(pagoSemanal)}</td>
-                        <td>$${formatoMoneda(saldoFinal < 0 ? 0 : saldoFinal)}</td>
-                    </tr>
-                `;
-                saldoInicial = saldoFinal;
-                return fila;
-            }).join("");
-
-            paginasHtml += `
-            <img src="https://static.wixstatic.com/media/0bf950_155f8cd81f6d4fe5ac3419b8e0397b40~mv2.png/v1/crop/x_0,y_260,w_6000,h_2480/fill/w_508,h_210,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/LOGO%20SIN%20FONDO%20OFICIAL.png" width="158px" height="80px">
-                <div style="${i > 0 ? 'page-break-before: always;' : ''}">
-                    <h2>VAMOS A MEJORAR S.A DE C.V SOFOM ENR</h2>
-                    <h4>HOJA DE CONTROL GRUPAL DE PAGOS</h4>
-                    <p><strong>NOMBRE DEL GRUPO: </strong> ${nombreCliente}</p>
-                    <p><strong>DÍA DE VISITA: </strong> ${grupoNombre}</p>
-                    <p><strong>CLAVE: </strong> ${credito.ciclo}</p>
-                    <p><strong>HORA DE VISITA: </strong> ${noPagos}</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th ROWSPAN="2">NO.</th>
-                                <th ROWSPAN="2">TIPO DE CRÉDITO</th>
-                                <th ROWSPAN="2">NOMBRE DEL CLIENTE</th>
-                                <th ROWSPAN="2">PAGO PACTADO</th>
-                                <th ROWSPAN="2">SEM ${noPagos}</th>
-                                <th ROWSPAN="2">S.F</th>
-                                </tr>
-                                <tr> 
-                                    ${tipoCredito}
-                                </tr>
-                        </thead>
-                        <tbody>
-                            ${tablaHtml}
-                        </tbody>
-                    </table>
-                    <p style="margin-top:60px; text-align:center;">
-                        ________________________________<br>
-                        FIRMA DEL CLIENTE
-                    </p>
-                </div>
+            // Fila A del miembro (Nombre y Pago)
+            tablaTbody += `
+                <tr>
+                    <td rowspan="2" align="center" style="font-weight:bold;">${index + 1}</td>
+                    <td align="center" style="font-size:9px; font-weight:bold;">${tipoCredito}</td>
+                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
+                    <td rowspan="2" style="font-size:11px;">
+                        <div style="display: flex; justify-content: space-between; width: 100%;">
+                            <span>$</span>
+                            <span>${formatoMoneda(pagoPactado)}</span>
+                        </div>
+                    </td>
             `;
+            for(let w = 0; w < maxSemanas; w++){
+                let valorCelda = '';
+                if (llena && credito.pagos) {
+                    // Agrupar todos los pagos de esa misma semana (numeroPago)
+                    const pagosSemana = credito.pagos.filter(p => p.numeroPago === w + 1);
+                    
+                    if (pagosSemana.length > 0) {
+                        const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
+                        // Usar la fecha del primer pago de esa semana
+                        const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
+                        // Compensar zona horaria
+                        fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
+
+                        valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                                        <span style="font-size: 7px; color: #666;">${fechaSemanaObj.toLocaleDateString('es-MX', {day:'2-digit', month:'2-digit'})}</span>
+                                        <span style="font-weight: bold; font-size: 10px; color: #2563eb;">$${formatoMoneda(montoTotalSemana)}</span>
+                                      </div>`;
+                        sumasSemanalesMod[w] += montoTotalSemana;
+                    }
+                }
+                tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle;">${valorCelda}</td>`;
+            }
+            let sfVal = '';
+            if (llena) sfVal = `$${formatoMoneda(credito.saldoPendiente)}`;
+            tablaTbody += `<td rowspan="2" align="center" style="font-size:10px; font-weight:bold;">${sfVal}</td></tr>`;
+
+            // Fila B del miembro (S.T. / Saldo)
+            tablaTbody += `
+                <tr>
+                    <td align="center" style="font-size:9px; font-weight:bold;">S.T.</td>
+                    <td style="font-size: 11px; padding: 0 5px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <span>$</span>
+                            <span>${formatoMoneda(saldoTotal)}</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+
+        // Totales - P.P.G.
+        tablaTbody += `
+            <tr>
+                <td colspan="3" align="center" style="font-weight:bold; font-size:11px; padding: 6px 0;">P.P.G.</td>
+                <td style="font-weight:bold; font-size:11px;">
+                    <div style="display:flex; justify-content:space-between; width:100%;">
+                        <span>$</span><span>${formatoMoneda(sumaPagoPactado)}</span>
+                    </div>
+                </td>
+        `;
+        for(let w = 0; w < maxSemanas; w++){
+            let val = llena && sumasSemanalesMod[w] > 0 ? `${formatoMoneda(sumasSemanalesMod[w])}` : '';
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
         }
+        let sfTotal = llena ? `$${formatoMoneda(sumaSaldoTotal - sumasSemanalesMod.reduce((a,b)=>a+b,0))}` : '';
+        tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px; color: #b91c1c;">${sfTotal}</td></tr>`;
+
+        // S.I. / S.S.
+        tablaTbody += `
+            <tr>
+                <td colspan="4" align="center" style="font-weight:bold; font-size:11px;">S.I.</td>
+        `;
+        for(let w = 0; w < maxSemanas; w++){
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">S.S.</td>`;
+        }
+        tablaTbody += `<td align="center" style="font-weight:bold; font-size:11px;">S.F.</td></tr>`;
+
+        // Fila Símbolo Pesos Final y Monto (Saldo Decreciente)
+        tablaTbody += `
+            <tr>
+                <td colspan="4" align="right" style="font-weight:bold; font-size:12px; padding-right:10px;"><span>$</span>${formatoMoneda(sumaSaldoTotal)}</td>
+        `;
+        let saldoAcumulado = sumaSaldoTotal;
+        for(let w = 0; w < maxSemanas; w++){
+            saldoAcumulado -= sumasSemanalesMod[w];
+            let val = (llena && sumasSemanalesMod[w] > 0) ? `${formatoMoneda(saldoAcumulado)}` : '';
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
+        }
+        tablaTbody += `<td></td></tr>`;
+
+        // Obtener datos del grupo del primer credito para la cabecera
+        const unCredito = creditos[0];
+        const grupo = unCredito?.miembro?.grupo;
+        const grupoNombre = grupo?.nombre || "INDIVIDUAL";
+        const diaVisita = grupo?.diaVisita || "________________";
+        const horaVisita = grupo?.horaVisita || "________________";        // TABLA 2: INCREMENTO DE GARANTÍA
+        let tablaIncrementoThead = `
+            <tr>
+                <th colspan="${4 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">INCREMENTO DE GTIA.</th>
+            </tr>
+            <tr>
+                <th width="2%">NO.</th>
+                <th width="8%">CARGO</th>
+                <th width="10%">GARANTIA<br>INICIAL</th>
+                <th width="14%">NOMBRE DEL CLIENTE</th>`;
+        for (let w = 1; w <= maxSemanas; w++) {
+             tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${w}</th>`;
+        }
+        tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
+
+        let tablaIncrementoTbody = '';
+        let sumaGarantiaInicial = 0;
+        creditos.forEach((credito, index) => {
+            const nombreCliente = credito.cliente
+                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                : credito.miembro
+                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                    : "N/A";
+            
+            let cargo = "INTEGRANTE";
+            if(credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+
+            const garantiaInicial = credito.garantia || 0;
+            sumaGarantiaInicial += garantiaInicial;
+
+            tablaIncrementoTbody += `
+                <tr>
+                    <td align="center" style="font-weight:bold;">${index + 1}</td>
+                    <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
+                    <td align="center" style="font-size:11px;">$ ${formatoMoneda(garantiaInicial)}</td>
+                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
+            `;
+            for(let w = 1; w <= maxSemanas; w++){
+                let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
+                let valorCelda = '';
+                if (llena && credito.ahorro && credito.ahorro.pagosAhorro) {
+                    const ahorro = credito.ahorro.pagosAhorro[w - 1];
+                    if (ahorro && ahorro.monto > 0) {
+                        valorCelda = `$${formatoMoneda(ahorro.monto)}`;
+                    }
+                }
+                tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
+            }
+            let totalAhorro = garantiaInicial;
+            if (llena && credito.ahorro) {
+               totalAhorro += (credito.ahorro.montoTotal || 0);
+            }
+            let finalVal = llena ? `$${formatoMoneda(totalAhorro)}` : '$ ';
+            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
+        });
+        
+        // Total Incremento
+        tablaIncrementoTbody += `
+            <tr>
+                <td colspan="2" align="center" style="font-weight:bold; font-size:9px; padding: 5px 0;">TOTAL<br>GARANTIA<br>INICIAL</td>
+                <td align="center" style="font-weight:bold; font-size:11px;">$ ${formatoMoneda(sumaGarantiaInicial)}</td>
+                <td align="right" style="font-weight:bold; padding-right:10px;">TOTAL</td>
+        `;
+        for(let w = 1; w <= maxSemanas; w++){
+            let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
+            tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+        }
+        tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
+
+        // TABLA 3: REGISTRO DE SOLIDARIOS
+        let tablaSolidariosThead = `
+            <tr>
+                <th colspan="${3 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">REGISTRO DE SOLIDARIOS</th>
+            </tr>
+            <tr>
+                <th width="2%">NO.</th>
+                <th width="8%">CARGO</th>
+                <th width="14%">NOMBRE DEL CLIENTE</th>`;
+        for (let w = 1; w <= maxSemanas; w++) {
+             tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${w}</th>`;
+        }
+        tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
+
+        let tablaSolidariosTbody = '';
+        creditos.forEach((credito, index) => {
+            const nombreCliente = credito.cliente
+                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                : credito.miembro
+                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                    : "N/A";
+            
+            let cargo = "INTEGRANTE";
+            if(credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+
+            tablaSolidariosTbody += `
+                <tr>
+                    <td align="center" style="font-weight:bold;">${index + 1}</td>
+                    <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
+                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
+            `;
+            let totalSolidarios = 0;
+            for(let w = 1; w <= maxSemanas; w++){
+                let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
+                let valorCelda = '';
+                if (llena && credito.pagos) {
+                    const pagoSol = credito.pagos.find(p => p.numeroPago === w && p.pagoSolidario === true);
+                    if (pagoSol && pagoSol.montoPagado > 0) {
+                        valorCelda = `$${formatoMoneda(pagoSol.montoPagado)}`;
+                        totalSolidarios += pagoSol.montoPagado;
+                    }
+                }
+                tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
+            }
+            let textTotalSol = llena && totalSolidarios > 0 ? `$${formatoMoneda(totalSolidarios)}` : '$ ';
+            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
+        });
+        
+        // Total Solidarios
+        tablaSolidariosTbody += `
+            <tr>
+                <td colspan="3" align="right" style="font-weight:bold; padding-right:10px; padding: 5px 0;">TOTAL</td>
+        `;
+        for(let w = 1; w <= maxSemanas; w++){
+            let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
+            tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+        }
+        tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
 
         // 5. TEMPLATE FINAL Y PDF
-        const htmlCompleto = `
-            <html>
-            <head>
-                <style>
-                    body { font-family: calibri, sans-serif; padding: 40px; font-size: 11px; }
-                    h2 { text-align: center; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    th, td { border: 1px solid black; padding: 4px; text-align: center; }
-                    th { background-color: #f2f2f2; }
-                    p { margin: 5px 0; }
-                </style>
-            </head>
-            <body>
-                ${paginasHtml}
-            </body>
-            </html>
-        `;
+        const templatePath = path.join(__dirname, '../templates/hojaControl.html');
+        let htmlCompleto = fs.readFileSync(templatePath, 'utf8');
 
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        const claveGrupo = grupo?.clave || "________________";
+
+        // REEMPLAZAR VARIABLES
+        htmlCompleto = htmlCompleto
+            .replace('{{grupoNombre}}', grupoNombre)
+            .replace('{{diaVisita}}', diaVisita)
+            .replace('{{clave}}', claveGrupo)
+            .replace('{{horaVisita}}', horaVisita)
+            .replace('{{ciclo}}', ciclo)
+            .replace('{{tablaThead}}', tablaThead)
+            .replace('{{tablaTbody}}', tablaTbody)
+            .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
+            .replace('{{tablaIncrementoTbody}}', tablaIncrementoTbody)
+            .replace('{{tablaSolidariosThead}}', tablaSolidariosThead)
+            .replace('{{tablaSolidariosTbody}}', tablaSolidariosTbody);  
+
+        if (req.query.format === 'html') {
+            return res.send(htmlCompleto);
+        }
+
+        const browser = await getBrowser();
 
         const page = await browser.newPage();
         await page.setContent(htmlCompleto, { waitUntil: "load" });
 
         const pdfBuffer = await page.pdf({
             format: "A4",
+            landscape: true,
             printBackground: true,
-            margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' }
+            margin: { top: '20mm', bottom: '15mm', left: '10mm', right: '10mm' }
         });
 
-        await browser.close();
+        await page.close();
 
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="hoja-control_grupo_${grupoId}_ciclo_${ciclo}.pdf"`);
+        const nombreArchivo = grupoNombre.replace(/\D/g, '').length === 0 ? grupoNombre.replace(/[^a-zA-Z0-9]/g, '_') : grupoNombre.replace(/\s+/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="hoja-control_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
         res.send(pdfBuffer);
 
     } catch (error) {
         console.error("Error generando hoja de control:", error);
+        res.status(500).json({
+            message: "Error interno",
+            error: error.message
+        });
+    }
+};
+
+
+exports.generarHojaControlIndividual = async (req, res) => {
+    const { clienteId, ciclo } = req.params;
+
+    try {
+        let creditos = await Credito.find({ cliente: clienteId })
+            .populate({
+                path: 'cliente',
+                populate: { path: 'asesor' }
+            })
+            .populate('miembro')
+            .sort({ createdAt: -1 });
+
+        let credito = creditos.find(c => c.ciclo == ciclo);
+        
+        if (!credito && creditos.length > 0) {
+            // Fallback if the DB didn't save the cycle correctly or it mismatches
+            credito = creditos[0]; 
+        }
+
+        if (!credito) {
+            return res.status(404).json({ message: "No se encontró el crédito para este cliente" });
+        }
+
+        const formatoMoneda = (num) =>
+            Number(num).toLocaleString('es-MX', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+
+        const generarCalendario = (fechaInicio, semanas) => {
+            const fechas = [];
+            let currentSaldo = credito.saldoTotal;
+            const pagoPactado = credito.pagoPactado || 0;
+            const llena = req.query.llena === 'true';
+
+            const baseDate = new Date(fechaInicio);
+            
+            // Adjust base date timezone properly by adding timezone offset to avoid previous day bug
+            baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
+
+            for (let i = 0; i < semanas; i++) {
+                const nueva = new Date(baseDate);
+                nueva.setDate(baseDate.getDate() + i * 7);
+                
+                const fechaStr = nueva.toLocaleDateString('es-MX', {
+                    day: '2-digit', month: '2-digit', year: 'numeric'
+                });
+
+                let pagoReal = 0;
+                let foundPayment = false;
+                if (credito.pagos) {
+                    const pagosSemana = credito.pagos.filter(p => p.numeroPago === i + 1);
+                    if (pagosSemana.length > 0) {
+                        pagoReal = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
+                        foundPayment = true;
+                    }
+                }
+
+                const saldoInicialRow = currentSaldo;
+                // Si está llena, restamos el pago real (si existe). Si no, restamos el pactado para el plan teórico.
+                const pagoParaSaldo = llena ? (foundPayment ? pagoReal : 0) : pagoPactado;
+                const saldoFinalRow = saldoInicialRow - pagoParaSaldo > 0 ? saldoInicialRow - pagoParaSaldo : 0;
+
+                fechas.push({
+                    numero: i + 1,
+                    fecha: fechaStr,
+                    saldoInicial: saldoInicialRow,
+                    pago: (llena && foundPayment) ? pagoReal : (llena ? 0 : pagoPactado),
+                    saldoFinal: saldoFinalRow,
+                    llena: llena,
+                    found: foundPayment
+                });
+
+                currentSaldo = saldoFinalRow;
+            }
+            return fechas;
+        };
+
+        const maxSemanas = credito.semanas || 16;
+        const fechaBasica = credito.fechaPrimerPago || new Date();
+        const amortizaciones = generarCalendario(fechaBasica, maxSemanas);
+
+        let tablaAmortizacionTbody = '';
+        amortizaciones.forEach(row => {
+            const si = row.llena ? ( (row.found || row.numero === 1) ? formatoMoneda(row.saldoInicial) : '' ) : '';
+            const p = row.llena ? ( row.found ? formatoMoneda(row.pago) : '' ) : '';
+            const sf = row.llena ? ( row.found ? formatoMoneda(row.saldoFinal) : '' ) : '';
+
+            tablaAmortizacionTbody += `
+                <tr>
+                    <td align="center" style="font-weight:bold;">${row.numero}</td>
+                    <td align="center" style="font-weight:bold;">${row.fecha}</td>
+                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${si}</span></div></td>
+                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${p}</span></div></td>
+                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${sf}</span></div></td>
+                </tr>
+            `;
+        });
+
+        // Obtener datos cabecera
+        const nombreCliente = credito.cliente
+            ? (credito.cliente.nombre + (credito.cliente.apellidos ? ` ${credito.cliente.apellidos}` : ""))
+            : credito.miembro
+                ? (credito.miembro.nombre + (credito.miembro.apellidos ? ` ${credito.miembro.apellidos}` : ""))
+                : "N/A";
+        
+        const saldoInicial = formatoMoneda(credito.saldoTotal || 0);
+        const garantia = formatoMoneda(credito.garantia || 0);
+        const pagoPactado = formatoMoneda(credito.pagoPactado || 0);
+        const periodoPago = "SEMANAL";
+        
+        // Obtener el día de la semana de fechaBasica
+        const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
+        const baseDate = new Date(fechaBasica);
+        baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
+        const diaPago = diasSemana[baseDate.getDay()];
+
+        const asesorStr = credito.cliente && credito.cliente.asesor 
+            ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
+            : "________________";
+        const asesorNombre = asesorStr.toUpperCase();
+
+        const templatePath = path.join(__dirname, '../templates/hojaControlIndividual.html');
+        let htmlCompleto = fs.readFileSync(templatePath, 'utf8');
+
+        htmlCompleto = htmlCompleto
+            .replace('{{clienteNombre}}', nombreCliente)
+            .replace('{{ciclo}}', ciclo)
+            .replace('{{saldoInicial}}', saldoInicial)
+            .replace('{{garantia}}', garantia)
+            .replace('{{periodoPago}}', periodoPago)
+            .replace('{{numPagos}}', maxSemanas)
+            .replace('{{diaPago}}', diaPago)
+            .replace('{{pagoPactado}}', pagoPactado)
+            .replace('{{asesorNombre}}', asesorNombre)
+            .replace('{{tablaAmortizacionTbody}}', tablaAmortizacionTbody);
+
+        if (req.query.format === 'html') {
+            return res.send(htmlCompleto);
+        }
+
+        const browser = await getBrowser();
+
+        const page = await browser.newPage();
+        await page.setContent(htmlCompleto, { waitUntil: "load" });
+
+        const pdfBuffer = await page.pdf({
+            format: "A4",
+            landscape: false, 
+            printBackground: true,
+            margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' }
+        });
+
+        await page.close();
+
+        res.setHeader('Content-Type', 'application/pdf');
+        const nombreArchivo = nombreCliente.replace(/\D/g, '').length === 0 ? nombreCliente.replace(/[^a-zA-Z0-9]/g, '_') : nombreCliente.replace(/\s+/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="hoja-control-ind_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
+        res.send(pdfBuffer);
+
+    } catch (error) {
+        console.error("Error generando hoja de control individual:", error);
         res.status(500).json({
             message: "Error interno",
             error: error.message

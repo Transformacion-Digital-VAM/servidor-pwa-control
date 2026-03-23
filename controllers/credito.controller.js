@@ -39,17 +39,20 @@ exports.crearCredito = async (req, res) => {
 
         // Validar semanas
         const numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
-        const saldoTotal = pagoPactado * numSemanas;
+        const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal 
+            ? req.body.saldoTotal 
+            : (pagoPactado * numSemanas);
 
+        const mongoose = require('mongoose');
         const nuevoCredito = new Credito({
-            miembro: tipoCredito !== 'Individual' ? miembro : null,
+            miembro: tipoCredito !== 'Individual' ? miembro : new mongoose.Types.ObjectId(),
             cliente: tipoCredito === 'Individual' ? cliente : null,
             ciclo,
             tipoCredito,
             semanas: numSemanas,
             pagoPactado,
-            saldoTotal,
-            saldoPendiente: saldoTotal,
+            saldoTotal: saldoTotalCalc,
+            saldoPendiente: saldoTotalCalc,
             garantia,
             ahorro: {
                 montoTotal: ahorro,
@@ -286,7 +289,21 @@ exports.registrarPago = async (req, res) => {
         }
 
         // --- CREACIÓN DEL REGISTRO DE PAGO ---
-        const numeroPago = creditoDestino.pagos.length + 1;
+        let numeroPago;
+        if (!creditoDestino.pagos || creditoDestino.pagos.length === 0) {
+            numeroPago = 1;
+        } else {
+            const ultimoPago = creditoDestino.pagos[creditoDestino.pagos.length - 1];
+            const fechaAhora = fechaPago ? new Date(fechaPago) : new Date();
+            const fechaUltimo = new Date(ultimoPago.fechaPago);
+
+            // Si es el mismo día calendario, mantenemos el mismo número de pago
+            if (fechaAhora.toDateString() === fechaUltimo.toDateString()) {
+                numeroPago = ultimoPago.numeroPago;
+            } else {
+                numeroPago = ultimoPago.numeroPago + 1;
+            }
+        }
 
         const nuevoPago = {
             numeroPago,
