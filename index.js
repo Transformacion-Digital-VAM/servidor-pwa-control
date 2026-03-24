@@ -1,4 +1,13 @@
-require('dotenv').config({ path: 'variables.env' });
+const fs = require('fs');
+const path = require('path');
+
+// Cargar variables de entorno localmente si el archivo existe
+if (fs.existsSync('variables.env')) {
+  require('dotenv').config({ path: 'variables.env' });
+} else {
+  require('dotenv').config(); // Intentar cargar .env por defecto o usar las de Render
+}
+
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -32,4 +41,7 @@ app.use('/api/clientes', clienteRoutes);
 app.use('/api/creditos', creditoRoutes);
 
 // Iniciar el servidor
-app.listen(3000, () => console.log('Server online: http://localhost:3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server online on port ${PORT}`);
+});
