@@ -25,14 +25,39 @@ const getBrowser = async () => {
             ]
         };
 
-        // Si estamos en Render, intentamos ayudarle a encontrar Chrome
+        // Búsqueda dinámica de Chrome en Render
         if (process.env.RENDER || process.env.PUPPETEER_CACHE_DIR) {
-            // Intentar usar la variable de entorno si el usuario la puso, 
-            // o buscar en la ruta que vimos en los logs
-            const renderChromePath = '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
-            if (fs.existsSync(renderChromePath)) {
-                console.log('[Puppeteer] Usando executablePath de Render:', renderChromePath);
-                options.executablePath = renderChromePath;
+            const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+            console.log(`[Puppeteer] Buscando Chrome en: ${cacheDir}`);
+            
+            try {
+                // Función recursiva simple para encontrar el ejecutable 'chrome'
+                const findChrome = (dir) => {
+                    const files = fs.readdirSync(dir);
+                    for (const file of files) {
+                        const fullPath = path.join(dir, file);
+                        const stat = fs.statSync(fullPath);
+                        if (stat.isDirectory()) {
+                            const found = findChrome(fullPath);
+                            if (found) return found;
+                        } else if (file === 'chrome' && (stat.mode & 0o111)) {
+                            return fullPath;
+                        }
+                    }
+                    return null;
+                };
+
+                if (fs.existsSync(cacheDir)) {
+                    const executablePath = findChrome(cacheDir);
+                    if (executablePath) {
+                        console.log('[Puppeteer] Ejecutable encontrado dinámicamente:', executablePath);
+                        options.executablePath = executablePath;
+                    } else {
+                        console.warn('[Puppeteer] No se encontró el ejecutable "chrome" dentro de la caché.');
+                    }
+                }
+            } catch (err) {
+                console.error('[Puppeteer] Error durante la búsqueda dinámica:', err.message);
             }
         }
 
@@ -41,11 +66,19 @@ const getBrowser = async () => {
             console.log('[Puppeteer] Navegador iniciado correctamente.');
         } catch (error) {
             console.error('[Puppeteer] Error al iniciar navegador:', error.message);
-            throw error;
+            // Si falla, intentamos una vez más sin executablePath por si acaso Puppeteer sabe algo que nosotros no
+            if (options.executablePath) {
+                console.log('[Puppeteer] Reintentando sin executablePath explícito...');
+                delete options.executablePath;
+                _browser = await puppeteer.launch(options);
+            } else {
+                throw error;
+            }
         }
     }
     return _browser;
 };
+
 
 
 exports.generarHojaControlGrupal = async (req, res) => {
