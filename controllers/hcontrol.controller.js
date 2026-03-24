@@ -9,7 +9,9 @@ const path = require('path');
 let _browser;
 const getBrowser = async () => {
     if (!_browser || !_browser.connected) {
-        _browser = await puppeteer.launch({
+        console.log('[Puppeteer] Iniciando instancia del navegador...');
+        
+        const options = {
             headless: true,
             args: [
                 '--no-sandbox', 
@@ -21,11 +23,30 @@ const getBrowser = async () => {
                 '--single-process',
                 '--disable-gpu'
             ]
-        });
+        };
 
+        // Si estamos en Render, intentamos ayudarle a encontrar Chrome
+        if (process.env.RENDER || process.env.PUPPETEER_CACHE_DIR) {
+            // Intentar usar la variable de entorno si el usuario la puso, 
+            // o buscar en la ruta que vimos en los logs
+            const renderChromePath = '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
+            if (fs.existsSync(renderChromePath)) {
+                console.log('[Puppeteer] Usando executablePath de Render:', renderChromePath);
+                options.executablePath = renderChromePath;
+            }
+        }
+
+        try {
+            _browser = await puppeteer.launch(options);
+            console.log('[Puppeteer] Navegador iniciado correctamente.');
+        } catch (error) {
+            console.error('[Puppeteer] Error al iniciar navegador:', error.message);
+            throw error;
+        }
     }
     return _browser;
 };
+
 
 exports.generarHojaControlGrupal = async (req, res) => {
     const { grupoId, ciclo } = req.params;
