@@ -25,41 +25,46 @@ const getBrowser = async () => {
             ]
         };
 
-        // Búsqueda dinámica de Chrome en Render
-        if (process.env.RENDER || process.env.PUPPETEER_CACHE_DIR) {
-            const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-            console.log(`[Puppeteer] Buscando Chrome en: ${cacheDir}`);
-            
-            try {
-                // Función recursiva simple para encontrar el ejecutable 'chrome'
-                const findChrome = (dir) => {
-                    const files = fs.readdirSync(dir);
-                    for (const file of files) {
-                        const fullPath = path.join(dir, file);
-                        const stat = fs.statSync(fullPath);
-                        if (stat.isDirectory()) {
-                            const found = findChrome(fullPath);
-                            if (found) return found;
-                        } else if (file === 'chrome' && (stat.mode & 0o111)) {
-                            return fullPath;
-                        }
-                    }
-                    return null;
-                };
+        // Búsqueda dinámica de Chrome en Render o local
+        const possibleCacheDirs = [
+            path.join(process.cwd(), '.puppeteer-cache'),
+            process.env.PUPPETEER_CACHE_DIR,
+            '/opt/render/.cache/puppeteer'
+        ].filter(Boolean);
 
+        console.log(`[Puppeteer] Buscando Chrome en: ${possibleCacheDirs.join(', ')}`);
+        
+        for (const cacheDir of possibleCacheDirs) {
+            try {
                 if (fs.existsSync(cacheDir)) {
+                    // Función recursiva simple para encontrar el ejecutable 'chrome'
+                    const findChrome = (dir) => {
+                        const files = fs.readdirSync(dir);
+                        for (const file of files) {
+                            const fullPath = path.join(dir, file);
+                            const stat = fs.statSync(fullPath);
+                            if (stat.isDirectory()) {
+                                const found = findChrome(fullPath);
+                                if (found) return found;
+                            } else if ((file === 'chrome' || file === 'chromium') && (stat.mode & 0o111)) {
+                                return fullPath;
+                            }
+                        }
+                        return null;
+                    };
+
                     const executablePath = findChrome(cacheDir);
                     if (executablePath) {
                         console.log('[Puppeteer] Ejecutable encontrado dinámicamente:', executablePath);
                         options.executablePath = executablePath;
-                    } else {
-                        console.warn('[Puppeteer] No se encontró el ejecutable "chrome" dentro de la caché.');
+                        break; // Encontrado, salir del loop
                     }
                 }
             } catch (err) {
-                console.error('[Puppeteer] Error durante la búsqueda dinámica:', err.message);
+                console.error(`[Puppeteer] Error buscando en ${cacheDir}:`, err.message);
             }
         }
+
 
         try {
             _browser = await puppeteer.launch(options);
