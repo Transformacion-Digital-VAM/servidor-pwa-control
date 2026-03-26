@@ -6,6 +6,10 @@ const clienteSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    grupo: {
+        type: String,
+        required: true
+    },
     diaPago: {
         type: String,
         required: true

@@ -14,13 +14,17 @@ exports.crearCredito = async (req, res) => {
             cliente,
             ciclo,
             tipoCredito,
-            pagoPactado,
+            //pagoPactado,
             semanas,
-            garantia,
+            //garantia,
             ahorro,
-            fechaPrimerPago
+            fechaPrimerPago,
+            tasaInteres,
+            montoSolicitado
         } = req.body;
 
+        const garantiaCalculada = montoSolicitado * 0.05;
+        const pagoPactado = montoSolicitado / 16;
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
             if (!cliente) {
@@ -39,8 +43,8 @@ exports.crearCredito = async (req, res) => {
 
         // Validar semanas
         const numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
-        const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal 
-            ? req.body.saldoTotal 
+        const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
+            ? req.body.saldoTotal
             : (pagoPactado * numSemanas);
 
         const mongoose = require('mongoose');
@@ -53,7 +57,9 @@ exports.crearCredito = async (req, res) => {
             pagoPactado,
             saldoTotal: saldoTotalCalc,
             saldoPendiente: saldoTotalCalc,
-            garantia,
+            garantia: garantiaCalculada,
+            tasaInteres,
+            montoSolicitado,
             ahorro: {
                 montoTotal: ahorro,
                 pagosAhorro: []

@@ -3,10 +3,10 @@ const router = express.Router();
 const clienteController = require('../controllers/cliente.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
-router.post('/', verifyToken, clienteController.createCliente);
-router.get('/', verifyToken, clienteController.getCliente);
-router.get('/:id', verifyToken, clienteController.getClientePorId);
-router.put('/:id', verifyToken, clienteController.updateCliente);
-router.delete('/:id', verifyToken, clienteController.deleteCliente);
+router.post('/', clienteController.createCliente); //verifyToken
+router.get('/', clienteController.getCliente); //verifyToken
+router.get('/:id', clienteController.getClientePorId); //verifyToken
+router.put('/:id', clienteController.updateCliente); //verifyToken
+router.delete('/:id', clienteController.deleteCliente); //verifyToken
 
 module.exports = router;

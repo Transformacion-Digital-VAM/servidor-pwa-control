@@ -32,6 +32,7 @@ const creditoSchema = new mongoose.Schema({
         montoPagado: { type: Number, required: true },
         fechaPago: { type: Date, default: Date.now },
         pagoSolidario: { type: Boolean, default: false },
+        metodoPago: { type: String, required: true },
         miembro: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Miembro',
@@ -55,7 +56,10 @@ const creditoSchema = new mongoose.Schema({
             monto: { type: Number },
             fecha: { type: Date, default: Date.now }
         }]
-    }
+    },
+    tasaInteres: { type: Number, required: true },
+    montoSolicitado: { type: Number, required: true },
+    frecuenciaPago: { type: String, required: true },
 
 }, { timestamps: true });
 
