@@ -14,7 +14,7 @@ exports.crearCredito = async (req, res) => {
             cliente,
             ciclo,
             tipoCredito,
-            //pagoPactado,
+            pagoPactado,
             semanas,
             //garantia,
             ahorro,
