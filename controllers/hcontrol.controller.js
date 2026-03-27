@@ -10,11 +10,11 @@ let _browser;
 const getBrowser = async () => {
     if (!_browser || !_browser.connected) {
         console.log('[Puppeteer] Iniciando instancia del navegador...');
-        
+
         const options = {
             headless: true,
             args: [
-                '--no-sandbox', 
+                '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
@@ -32,7 +32,7 @@ const getBrowser = async () => {
         ].filter(Boolean);
 
         console.log(`[Puppeteer] Buscando Chrome en: ${possibleCacheDirs.join(', ')}`);
-        
+
         for (const cacheDir of possibleCacheDirs) {
             try {
                 if (fs.existsSync(cacheDir)) {
@@ -119,7 +119,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 maximumFractionDigits: 2
             });
 
-        const generarCalendario = (fechaInicio, semanas) => {
+        const generarCalendario = (fechaInicio, semanas, isRefill = false) => {
             const fechas = [];
             const base = new Date(fechaInicio);
             // Desfase de zona horaria
@@ -129,60 +129,80 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 const nueva = new Date(base);
                 nueva.setDate(base.getDate() + i * 7);
                 fechas.push({
-                    numero: i + 1,
+                    numero: isRefill ? i + 9 : i + 1,
                     fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
                 });
             }
             return fechas;
         };
 
-        // 4. GENERAR TABLA PRINCIPAL (control de pagos)
-        let sumaPagoPactado = 0;
-        let sumaSaldoTotal = 0;
-        let maxSemanas = 16;
-        if(creditos.length > 0 && creditos[0].semanas) {
-            maxSemanas = creditos[0].semanas;
-        }
 
-        const llena = req.query.llena === 'true';
-        const sumasSemanalesMod = new Array(maxSemanas).fill(0);
-        
-        const fechaBasica = creditos.length > 0 ? creditos[0].fechaPrimerPago : new Date();
-        const calendario = generarCalendario(fechaBasica, maxSemanas);
+        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R');
+        const creditosRefill = creditos.filter(c => c.tipoCredito === 'R');
 
-        let tablaThead = `<tr>
+        let gruposCreditos = [];
+        if (creditosNormales.length > 0) gruposCreditos.push(creditosNormales);
+        if (creditosRefill.length > 0) gruposCreditos.push(creditosRefill);
+
+        const templatePath = path.join(__dirname, '../templates/hojaControl.html');
+        let htmlCompletoOrigin = fs.readFileSync(templatePath, 'utf8');
+
+        let bodyMatch = htmlCompletoOrigin.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        let bodyTemplate = bodyMatch ? bodyMatch[1] : '';
+
+        let finalBodies = [];
+
+        for (let sub = 0; sub < gruposCreditos.length; sub++) {
+            const creditosSubGrupo = gruposCreditos[sub];
+
+            // 4. GENERAR TABLA PRINCIPAL (control de pagos)
+            let sumaPagoPactado = 0;
+            let sumaSaldoTotal = 0;
+            let maxSemanas = 16;
+            if (creditosSubGrupo.length > 0 && creditosSubGrupo[0].semanas) {
+                maxSemanas = creditosSubGrupo[0].semanas;
+            }
+
+            const llena = req.query.llena === 'true';
+            const sumasSemanalesMod = new Array(maxSemanas).fill(0);
+
+            const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
+            const fechaBasica = creditosSubGrupo.length > 0 ? creditosSubGrupo[0].fechaPrimerPago : new Date();
+            const calendario = generarCalendario(fechaBasica, maxSemanas, esRefill);
+
+            let tablaThead = `<tr>
             <th rowspan="2" width="2%">NO.</th>
             <th rowspan="2" width="4%" style="font-size:9px;">TIPO DE<br>CRÉDITO</th>
             <th rowspan="2" width="14%">NOMBRE DEL<br>CLIENTE</th>
             <th rowspan="2" width="7%">PAGO<br>PACTADO</th>`;
-        
-        calendario.forEach(p => {
-             tablaThead += `<th width="4%" style="font-size:9px;">SEM ${p.numero}</th>`;
-        });
-        tablaThead += `<th rowspan="2" width="4%">S.F.</th></tr><tr>`;
-        calendario.forEach(p => {
-             tablaThead += `<th style="font-size: 8px;">${p.fecha}</th>`;
-        });
-        tablaThead += `</tr>`;
 
-        let tablaTbody = '';
-        
-        creditos.forEach((credito, index) => {
-            const nombreCliente = credito.cliente
-                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                : credito.miembro
-                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                    : "N/A";
-            
-            const tipoCredito = credito.tipoCredito || "C.C.";
-            const pagoPactado = credito.pagoPactado || 0;
-            const saldoTotal = credito.saldoTotal || 0;
-            
-            sumaPagoPactado += pagoPactado;
-            sumaSaldoTotal += saldoTotal;
+            calendario.forEach(p => {
+                tablaThead += `<th width="4%" style="font-size:9px;">SEM ${p.numero}</th>`;
+            });
+            tablaThead += `<th rowspan="2" width="4%">S.F.</th></tr><tr>`;
+            calendario.forEach(p => {
+                tablaThead += `<th style="font-size: 8px;">${p.fecha}</th>`;
+            });
+            tablaThead += `</tr>`;
 
-            // Fila A del miembro (Nombre y Pago)
-            tablaTbody += `
+            let tablaTbody = '';
+
+            creditosSubGrupo.forEach((credito, index) => {
+                const nombreCliente = credito.cliente
+                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                    : credito.miembro
+                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                        : "N/A";
+
+                const tipoCredito = credito.tipoCredito || "C.C.";
+                const pagoPactado = credito.pagoPactado || 0;
+                const saldoTotal = credito.saldoTotal || 0;
+
+                sumaPagoPactado += pagoPactado;
+                sumaSaldoTotal += saldoTotal;
+
+                // Fila A del miembro (Nombre y Pago)
+                tablaTbody += `
                 <tr>
                     <td rowspan="2" align="center" style="font-weight:bold;">${index + 1}</td>
                     <td align="center" style="font-size:9px; font-weight:bold;">${tipoCredito}</td>
@@ -194,40 +214,40 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         </div>
                     </td>
             `;
-            for(let w = 0; w < maxSemanas; w++){
-                let valorCelda = '';
-                let tdBgStyle = '';
-                if (llena && credito.pagos) {
-                    // Agrupar todos los pagos de esa misma semana (numeroPago)
-                    const pagosSemana = credito.pagos.filter(p => p.numeroPago === w + 1);
-                    
-                    if (pagosSemana.length > 0) {
-                        const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
-                        // Usar la fecha del primer pago de esa semana
-                        const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
-                        // zona horaria
-                        fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
+                for (let w = 0; w < maxSemanas; w++) {
+                    let valorCelda = '';
+                    let tdBgStyle = '';
+                    if (llena && credito.pagos) {
+                        // Agrupar todos los pagos de esa misma semana (numeroPago)
+                        const pagosSemana = credito.pagos.filter(p => p.numeroPago === w + 1);
 
-                        const esAbonoSolidario = pagosSemana.some(p => p.pagoSolidario === true);
-                        tdBgStyle = esAbonoSolidario ? 'background-color: #ffedd5;' : '';
-                        let textColor = esAbonoSolidario ? 'color: #c2410c;' : 'color: #2563eb;';
-                        let dateColor = esAbonoSolidario ? 'color: #ea580c;' : 'color: #666;';
+                        if (pagosSemana.length > 0) {
+                            const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
+                            // Usar la fecha del primer pago de esa semana
+                            const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
+                            // zona horaria
+                            fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
 
-                        valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                        <span style="font-size: 7px; ${dateColor}">${fechaSemanaObj.toLocaleDateString('es-MX', {day:'2-digit', month:'2-digit'})}</span>
-                                        <span style="font-weight: bold; font-size: 10px; ${textColor}">$${formatoMoneda(montoTotalSemana)}</span>
+                            const esAbonoSolidario = pagosSemana.some(p => p.pagoSolidario === true);
+                            tdBgStyle = esAbonoSolidario ? 'background-color: #ffedd5;' : '';
+                            let textColor = esAbonoSolidario ? 'color: #c2410c;' : 'color: #2563eb;';
+                            let dateColor = esAbonoSolidario ? 'color: #ea580c;' : 'color: #666;';
+
+                            valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                                        <span style="font-size: 7px; ${dateColor}">${fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' })}</span>
+                                        <span style="font-weight: bold; font-size: 10px; ${textColor}">${formatoMoneda(montoTotalSemana)}</span>
                                       </div>`;
-                        sumasSemanalesMod[w] += montoTotalSemana;
+                            sumasSemanalesMod[w] += montoTotalSemana;
+                        }
                     }
+                    tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}">${valorCelda}</td>`;
                 }
-                tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}">${valorCelda}</td>`;
-            }
-            let sfVal = '';
-            if (llena) sfVal = `$${formatoMoneda(credito.saldoPendiente)}`;
-            tablaTbody += `<td rowspan="2" align="center" style="font-size:10px; font-weight:bold;">${sfVal}</td></tr>`;
+                let sfVal = '';
+                if (llena) sfVal = `${formatoMoneda(credito.saldoPendiente)}`;
+                tablaTbody += `<td rowspan="2" align="center" style="font-size:10px; font-weight:bold;">${sfVal}</td></tr>`;
 
-            // Fila B del miembro (S.T. / Saldo)
-            tablaTbody += `
+                // Fila B del miembro (S.T. / Saldo)
+                tablaTbody += `
                 <tr>
                     <td align="center" style="font-size:9px; font-weight:bold;">S.T.</td>
                     <td style="font-size: 11px; padding: 0 5px;">
@@ -238,10 +258,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     </td>
                 </tr>
             `;
-        });
+            });
 
-        // Totales - P.P.G.
-        tablaTbody += `
+            // Totales - P.P.G.
+            tablaTbody += `
             <tr>
                 <td colspan="3" align="center" style="font-weight:bold; font-size:11px; padding: 6px 0;">P.P.G.</td>
                 <td style="font-weight:bold; font-size:11px;">
@@ -250,43 +270,43 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     </div>
                 </td>
         `;
-        for(let w = 0; w < maxSemanas; w++){
-            let val = llena && sumasSemanalesMod[w] > 0 ? `${formatoMoneda(sumasSemanalesMod[w])}` : '';
-            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
-        }
-        let sfTotal = llena ? `$${formatoMoneda(sumaSaldoTotal - sumasSemanalesMod.reduce((a,b)=>a+b,0))}` : '';
-        tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px; color: #b91c1c;">${sfTotal}</td></tr>`;
+            for (let w = 0; w < maxSemanas; w++) {
+                let val = llena && sumasSemanalesMod[w] > 0 ? `${formatoMoneda(sumasSemanalesMod[w])}` : '';
+                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
+            }
+            let sfTotal = llena ? `${formatoMoneda(sumaSaldoTotal - sumasSemanalesMod.reduce((a, b) => a + b, 0))}` : '';
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px; color: #b91c1c;">${sfTotal}</td></tr>`;
 
-        // S.I. / S.S.
-        tablaTbody += `
+            // S.I. / S.S.
+            tablaTbody += `
             <tr>
                 <td colspan="4" align="center" style="font-weight:bold; font-size:11px;">S.I.</td>
         `;
-        for(let w = 0; w < maxSemanas; w++){
-            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">S.S.</td>`;
-        }
-        tablaTbody += `<td align="center" style="font-weight:bold; font-size:11px;">S.F.</td></tr>`;
+            for (let w = 0; w < maxSemanas; w++) {
+                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">S.S.</td>`;
+            }
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:11px;">S.F.</td></tr>`;
 
-        // Fila Símbolo Pesos Final y Monto (Saldo Decreciente)
-        tablaTbody += `
+            // Fila Símbolo Pesos Final y Monto (Saldo Decreciente)
+            tablaTbody += `
             <tr>
                 <td colspan="4" align="right" style="font-weight:bold; font-size:12px; padding-right:10px;"><span>$</span>${formatoMoneda(sumaSaldoTotal)}</td>
         `;
-        let saldoAcumulado = sumaSaldoTotal;
-        for(let w = 0; w < maxSemanas; w++){
-            saldoAcumulado -= sumasSemanalesMod[w];
-            let val = (llena && sumasSemanalesMod[w] > 0) ? `${formatoMoneda(saldoAcumulado)}` : '';
-            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
-        }
-        tablaTbody += `<td></td></tr>`;
+            let saldoAcumulado = sumaSaldoTotal;
+            for (let w = 0; w < maxSemanas; w++) {
+                saldoAcumulado -= sumasSemanalesMod[w];
+                let val = (llena && sumasSemanalesMod[w] > 0) ? `${formatoMoneda(saldoAcumulado)}` : '';
+                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
+            }
+            tablaTbody += `<td></td></tr>`;
 
-        // Obtener datos del grupo del primer credito para la cabecera
-        const unCredito = creditos[0];
-        const grupo = unCredito?.miembro?.grupo;
-        const grupoNombre = grupo?.nombre || "INDIVIDUAL";
-        const diaVisita = grupo?.diaVisita || "________________";
-        const horaVisita = grupo?.horaVisita || "________________";        // TABLA 2: INCREMENTO DE GARANTÍA
-        let tablaIncrementoThead = `
+            // Obtener datos del grupo del primer credito para la cabecera
+            const unCredito = creditosSubGrupo[0];
+            const grupo = unCredito?.miembro?.grupo;
+            const grupoNombre = grupo?.nombre || "INDIVIDUAL";
+            const diaVisita = grupo?.diaVisita || "________________";
+            const horaVisita = grupo?.horaVisita || "________________";        // TABLA 2: INCREMENTO DE GARANTÍA
+            let tablaIncrementoThead = `
             <tr>
                 <th colspan="${4 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">INCREMENTO DE GTIA.</th>
             </tr>
@@ -295,67 +315,70 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <th width="8%">CARGO</th>
                 <th width="10%">GARANTIA<br>INICIAL</th>
                 <th width="14%">NOMBRE DEL CLIENTE</th>`;
-        for (let w = 1; w <= maxSemanas; w++) {
-             tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${w}</th>`;
-        }
-        tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
+            for (let w = 1; w <= maxSemanas; w++) {
+                const lbl = esRefill ? w + 8 : w;
+                tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
+            }
+            tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
 
-        let tablaIncrementoTbody = '';
-        let sumaGarantiaInicial = 0;
-        creditos.forEach((credito, index) => {
-            const nombreCliente = credito.cliente
-                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                : credito.miembro
-                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                    : "N/A";
-            
-            let cargo = "INTEGRANTE";
-            if(credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+            let tablaIncrementoTbody = '';
+            let sumaGarantiaInicial = 0;
+            creditosSubGrupo.forEach((credito, index) => {
+                const nombreCliente = credito.cliente
+                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                    : credito.miembro
+                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                        : "N/A";
 
-            const garantiaInicial = credito.garantia || 0;
-            sumaGarantiaInicial += garantiaInicial;
+                let cargo = "INTEGRANTE";
+                if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
 
-            tablaIncrementoTbody += `
+                const garantiaInicial = credito.garantia || 0;
+                sumaGarantiaInicial += garantiaInicial;
+
+                tablaIncrementoTbody += `
                 <tr>
                     <td align="center" style="font-weight:bold;">${index + 1}</td>
                     <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
                     <td align="center" style="font-size:11px;">$ ${formatoMoneda(garantiaInicial)}</td>
                     <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
             `;
-            for(let w = 1; w <= maxSemanas; w++){
-                let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
-                let valorCelda = '';
-                if (llena && credito.ahorro && credito.ahorro.pagosAhorro) {
-                    const ahorro = credito.ahorro.pagosAhorro[w - 1];
-                    if (ahorro && ahorro.monto > 0) {
-                        valorCelda = `$${formatoMoneda(ahorro.monto)}`;
+                for (let w = 1; w <= maxSemanas; w++) {
+                    let label = esRefill ? w + 8 : w;
+                    let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+                    let valorCelda = '';
+                    if (llena && credito.ahorro && credito.ahorro.pagosAhorro) {
+                        const ahorro = credito.ahorro.pagosAhorro[w - 1];
+                        if (ahorro && ahorro.monto > 0) {
+                            valorCelda = `${formatoMoneda(ahorro.monto)}`;
+                        }
                     }
+                    tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
                 }
-                tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
-            }
-            let totalAhorro = garantiaInicial;
-            if (llena && credito.ahorro) {
-               totalAhorro += (credito.ahorro.montoTotal || 0);
-            }
-            let finalVal = llena ? `$${formatoMoneda(totalAhorro)}` : '$ ';
-            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
-        });
-        
-        // Total Incremento
-        tablaIncrementoTbody += `
+                let totalAhorro = garantiaInicial;
+                if (llena && credito.ahorro) {
+                    totalAhorro += (credito.ahorro.montoTotal || 0);
+                }
+                let finalVal = llena ? `${formatoMoneda(totalAhorro)}` : '$ ';
+                tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
+            });
+
+            // Total Incremento
+            tablaIncrementoTbody += `
             <tr>
                 <td colspan="2" align="center" style="font-weight:bold; font-size:9px; padding: 5px 0;">TOTAL<br>GARANTIA<br>INICIAL</td>
                 <td align="center" style="font-weight:bold; font-size:11px;">$ ${formatoMoneda(sumaGarantiaInicial)}</td>
                 <td align="right" style="font-weight:bold; padding-right:10px;">TOTAL</td>
         `;
-        for(let w = 1; w <= maxSemanas; w++){
-            let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
-            tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
-        }
-        tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
+            for (let w = 1; w <= maxSemanas; w++) {
+                let label = esRefill ? w + 8 : w;
+                let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+                tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+            }
+            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
 
-        // TABLA 3: REGISTRO DE SOLIDARIOS
-        let tablaSolidariosThead = `
+            // TABLA 3: REGISTRO DE SOLIDARIOS
+            let tablaSolidariosThead = `
             <tr>
                 <th colspan="${3 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">REGISTRO DE SOLIDARIOS</th>
             </tr>
@@ -363,89 +386,97 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <th width="2%">NO.</th>
                 <th width="8%">CARGO</th>
                 <th width="14%">NOMBRE DEL CLIENTE</th>`;
-        for (let w = 1; w <= maxSemanas; w++) {
-             tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${w}</th>`;
-        }
-        tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
+            for (let w = 1; w <= maxSemanas; w++) {
+                const lbl = esRefill ? w + 8 : w;
+                tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
+            }
+            tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
 
-        let tablaSolidariosTbody = '';
-        creditos.forEach((credito, index) => {
-            const nombreCliente = credito.cliente
-                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                : credito.miembro
-                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                    : "N/A";
-            
-            let cargo = "INTEGRANTE";
-            if(credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+            let tablaSolidariosTbody = '';
+            creditosSubGrupo.forEach((credito, index) => {
+                const nombreCliente = credito.cliente
+                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                    : credito.miembro
+                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                        : "N/A";
 
-            tablaSolidariosTbody += `
+                let cargo = "INTEGRANTE";
+                if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+
+                tablaSolidariosTbody += `
                 <tr>
                     <td align="center" style="font-weight:bold;">${index + 1}</td>
                     <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
                     <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
             `;
-            let totalSolidarios = 0;
-            const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
+                let totalSolidarios = 0;
+                const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
 
-            for(let w = 1; w <= maxSemanas; w++){
-                let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
-                let valorCelda = '';
-                if (llena && contributorId) {
-                    let montoAportadoPorElMiembro = 0;
+                for (let w = 1; w <= maxSemanas; w++) {
+                    let label = esRefill ? w + 8 : w;
+                    let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+                    let valorCelda = '';
+                    if (llena && contributorId) {
+                        let montoAportadoPorElMiembro = 0;
 
-                    for (const otroCredito of creditos) {
-                        if (otroCredito.pagos) {
-                            const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === w && p.pagoSolidario === true);
-                            for (const pSol of pagosSolSemana) {
-                                if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
-                                    montoAportadoPorElMiembro += pSol.montoPagado;
+                        for (const otroCredito of creditosSubGrupo) {
+                            if (otroCredito.pagos) {
+                                const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === w && p.pagoSolidario === true);
+                                for (const pSol of pagosSolSemana) {
+                                    if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
+                                        montoAportadoPorElMiembro += pSol.montoPagado;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    if (montoAportadoPorElMiembro > 0) {
-                        valorCelda = `$${formatoMoneda(montoAportadoPorElMiembro)}`;
-                        totalSolidarios += montoAportadoPorElMiembro;
+                        if (montoAportadoPorElMiembro > 0) {
+                            valorCelda = `${formatoMoneda(montoAportadoPorElMiembro)}`;
+                            totalSolidarios += montoAportadoPorElMiembro;
+                        }
                     }
+                    tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
                 }
-                tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
-            }
-            let textTotalSol = llena && totalSolidarios > 0 ? `$${formatoMoneda(totalSolidarios)}` : '$ ';
-            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
-        });
-        
-        // Total Solidarios
-        tablaSolidariosTbody += `
+                let textTotalSol = llena && totalSolidarios > 0 ? `${formatoMoneda(totalSolidarios)}` : '$ ';
+                tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
+            });
+
+            // Total Solidarios
+            tablaSolidariosTbody += `
             <tr>
                 <td colspan="3" align="right" style="font-weight:bold; padding-right:10px; padding: 5px 0;">TOTAL</td>
         `;
-        for(let w = 1; w <= maxSemanas; w++){
-            let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
-            tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+            for (let w = 1; w <= maxSemanas; w++) {
+                let label = esRefill ? w + 8 : w;
+                let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+                tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+            }
+            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
+
+            // 5. TEMPLATE FINAL Y PDF
+
+
+
+            const claveGrupo = grupo?.clave || "________________";
+
+            // REEMPLAZAR VARIABLES
+            let seccionBody = bodyTemplate
+                .replace('{{grupoNombre}}', grupoNombre)
+                .replace('{{diaVisita}}', diaVisita)
+                .replace('{{clave}}', claveGrupo)
+                .replace('{{horaVisita}}', horaVisita)
+                .replace('{{ciclo}}', ciclo)
+                .replace('{{tablaThead}}', tablaThead)
+                .replace('{{tablaTbody}}', tablaTbody)
+                .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
+                .replace('{{tablaIncrementoTbody}}', tablaIncrementoTbody)
+                .replace('{{tablaSolidariosThead}}', tablaSolidariosThead)
+                .replace('{{tablaSolidariosTbody}}', tablaSolidariosTbody);
+
+            finalBodies.push(seccionBody);
         }
-        tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
 
-        // 5. TEMPLATE FINAL Y PDF
-        const templatePath = path.join(__dirname, '../templates/hojaControl.html');
-        let htmlCompleto = fs.readFileSync(templatePath, 'utf8');
-
-        const claveGrupo = grupo?.clave || "________________";
-
-        // REEMPLAZAR VARIABLES
-        htmlCompleto = htmlCompleto
-            .replace('{{grupoNombre}}', grupoNombre)
-            .replace('{{diaVisita}}', diaVisita)
-            .replace('{{clave}}', claveGrupo)
-            .replace('{{horaVisita}}', horaVisita)
-            .replace('{{ciclo}}', ciclo)
-            .replace('{{tablaThead}}', tablaThead)
-            .replace('{{tablaTbody}}', tablaTbody)
-            .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
-            .replace('{{tablaIncrementoTbody}}', tablaIncrementoTbody)
-            .replace('{{tablaSolidariosThead}}', tablaSolidariosThead)
-            .replace('{{tablaSolidariosTbody}}', tablaSolidariosTbody);  
+        let htmlCompleto = htmlCompletoOrigin.replace(/<body[^>]*>[\s\S]*?<\/body>/i, '<body>' + finalBodies.join('<div style="page-break-before: always;"></div>') + '</body>');
 
         if (req.query.format === 'html') {
             return res.send(htmlCompleto);
@@ -466,7 +497,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
         await page.close();
 
         res.setHeader('Content-Type', 'application/pdf');
-        const nombreArchivo = grupoNombre.replace(/\D/g, '').length === 0 ? grupoNombre.replace(/[^a-zA-Z0-9]/g, '_') : grupoNombre.replace(/\s+/g, '_');
+        const grupoG = creditos[0]?.miembro?.grupo;
+        const nombreG = grupoG?.nombre || "INDIVIDUAL";
+        const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
         res.setHeader('Content-Disposition', `attachment; filename="hoja-control_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
         res.send(pdfBuffer);
 
@@ -478,7 +511,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
         });
     }
 };
-
 
 exports.generarHojaControlIndividual = async (req, res) => {
     const { clienteId, ciclo } = req.params;
@@ -493,10 +525,10 @@ exports.generarHojaControlIndividual = async (req, res) => {
             .sort({ createdAt: -1 });
 
         let credito = creditos.find(c => c.ciclo == ciclo);
-        
+
         if (!credito && creditos.length > 0) {
             // Fallback si la BD no guardo el ciclo
-            credito = creditos[0]; 
+            credito = creditos[0];
         }
 
         if (!credito) {
@@ -516,14 +548,14 @@ exports.generarHojaControlIndividual = async (req, res) => {
             const llena = req.query.llena === 'true';
 
             const baseDate = new Date(fechaInicio);
-            
+
             // Ajustar fecha base
             baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
 
             for (let i = 0; i < semanas; i++) {
                 const nueva = new Date(baseDate);
                 nueva.setDate(baseDate.getDate() + i * 7);
-                
+
                 const fechaStr = nueva.toLocaleDateString('es-MX', {
                     day: '2-digit', month: '2-digit', year: 'numeric'
                 });
@@ -544,7 +576,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 const saldoFinalRow = saldoInicialRow - pagoParaSaldo > 0 ? saldoInicialRow - pagoParaSaldo : 0;
 
                 fechas.push({
-                    numero: i + 1,
+                    numero: credito.tipoCredito === 'R' ? i + 9 : i + 1,
                     fecha: fechaStr,
                     saldoInicial: saldoInicialRow,
                     pago: (llena && foundPayment) ? pagoReal : (llena ? 0 : pagoPactado),
@@ -564,9 +596,9 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         let tablaAmortizacionTbody = '';
         amortizaciones.forEach(row => {
-            const si = row.llena ? ( (row.found || row.numero === 1) ? formatoMoneda(row.saldoInicial) : '' ) : '';
-            const p = row.llena ? ( row.found ? formatoMoneda(row.pago) : '' ) : '';
-            const sf = row.llena ? ( row.found ? formatoMoneda(row.saldoFinal) : '' ) : '';
+            const si = row.llena ? ((row.found || row.numero === 1) ? formatoMoneda(row.saldoInicial) : '') : '';
+            const p = row.llena ? (row.found ? formatoMoneda(row.pago) : '') : '';
+            const sf = row.llena ? (row.found ? formatoMoneda(row.saldoFinal) : '') : '';
 
             tablaAmortizacionTbody += `
                 <tr>
@@ -585,12 +617,12 @@ exports.generarHojaControlIndividual = async (req, res) => {
             : credito.miembro
                 ? (credito.miembro.nombre + (credito.miembro.apellidos ? ` ${credito.miembro.apellidos}` : ""))
                 : "N/A";
-        
+
         const saldoInicial = formatoMoneda(credito.saldoTotal || 0);
         const garantia = formatoMoneda(credito.garantia || 0);
         const pagoPactado = formatoMoneda(credito.pagoPactado || 0);
         const periodoPago = (credito.frecuenciaPago || "SEMANAL").toUpperCase();
-        
+
         let grupoOpcionalHtml = '';
         if (credito.grupoOpcional && credito.grupoOpcional.trim() !== '') {
             grupoOpcionalHtml = `
@@ -608,14 +640,14 @@ exports.generarHojaControlIndividual = async (req, res) => {
                     <div style="font-weight: normal; text-transform: uppercase;">${credito.garantiaPredial}</div>
                 </div>`;
         }
-        
+
         // Obtener el día de la semana de fechaBasica
         const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
         const baseDate = new Date(fechaBasica);
         baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
         const diaPago = diasSemana[baseDate.getDay()];
 
-        const asesorStr = credito.cliente && credito.cliente.asesor 
+        const asesorStr = credito.cliente && credito.cliente.asesor
             ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
             : "________________";
         const asesorNombre = asesorStr.toUpperCase();
@@ -648,7 +680,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         const pdfBuffer = await page.pdf({
             format: "A4",
-            landscape: false, 
+            landscape: false,
             printBackground: true,
             margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' }
         });
