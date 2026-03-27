@@ -45,7 +45,7 @@ exports.crearCredito = async (req, res) => {
         // Validar semanas
         let numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
         if (tipoCredito === 'R') {
-            numSemanas = 16;
+            numSemanas = 8;
         }
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
             ? req.body.saldoTotal

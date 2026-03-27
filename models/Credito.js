@@ -66,6 +66,6 @@ const creditoSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-creditoSchema.index({ miembro: 1, ciclo: 1 }, { unique: true });
+creditoSchema.index({ miembro: 1, ciclo: 1, tipoCredito: 1 }, { unique: true });
 
 module.exports = mongoose.model('Credito', creditoSchema);
