@@ -22,7 +22,7 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: 'http://192.168.1.12:8080',
+  origin: '',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
