@@ -1,11 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 
-// Cargar variables de entorno localmente si el archivo existe
+// Cargar variables de entorno localmente
 if (fs.existsSync('variables.env')) {
   require('dotenv').config({ path: 'variables.env' });
 } else {
-  require('dotenv').config(); // Intentar cargar .env por defecto o usar las de Render
+  require('dotenv').config(); // cargar .env o usar Render
 }
 
 const express = require('express');
@@ -22,7 +22,7 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: '*',
+  origin: 'http://192.168.1.12:8080',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
@@ -41,4 +41,4 @@ app.use('/api/creditos', creditoRoutes);
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server online on port ${PORT}`);
-});
+});

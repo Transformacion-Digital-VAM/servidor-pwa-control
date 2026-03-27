@@ -20,7 +20,6 @@ const getBrowser = async () => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
                 '--disable-gpu'
             ]
         };
@@ -71,7 +70,7 @@ const getBrowser = async () => {
             console.log('[Puppeteer] Navegador iniciado correctamente.');
         } catch (error) {
             console.error('[Puppeteer] Error al iniciar navegador:', error.message);
-            // Si falla, intentamos una vez más sin executablePath por si acaso Puppeteer sabe algo que nosotros no
+            // Si falla, volver a intentar
             if (options.executablePath) {
                 console.log('[Puppeteer] Reintentando sin executablePath explícito...');
                 delete options.executablePath;
@@ -123,7 +122,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const generarCalendario = (fechaInicio, semanas) => {
             const fechas = [];
             const base = new Date(fechaInicio);
-            // Compensar desfase de zona horaria para evitar error de un día atrás
+            // Desfase de zona horaria
             base.setMinutes(base.getMinutes() + base.getTimezoneOffset());
 
             for (let i = 0; i < semanas; i++) {
@@ -137,7 +136,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
             return fechas;
         };
 
-        // 4. GENERAR TABLA PRINCIPAL AL ESTILO DE LA IMAGEN
+        // 4. GENERAR TABLA PRINCIPAL (control de pagos)
         let sumaPagoPactado = 0;
         let sumaSaldoTotal = 0;
         let maxSemanas = 16;
@@ -197,6 +196,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
             `;
             for(let w = 0; w < maxSemanas; w++){
                 let valorCelda = '';
+                let tdBgStyle = '';
                 if (llena && credito.pagos) {
                     // Agrupar todos los pagos de esa misma semana (numeroPago)
                     const pagosSemana = credito.pagos.filter(p => p.numeroPago === w + 1);
@@ -205,17 +205,22 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
                         // Usar la fecha del primer pago de esa semana
                         const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
-                        // Compensar zona horaria
+                        // zona horaria
                         fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
 
+                        const esAbonoSolidario = pagosSemana.some(p => p.pagoSolidario === true);
+                        tdBgStyle = esAbonoSolidario ? 'background-color: #ffedd5;' : '';
+                        let textColor = esAbonoSolidario ? 'color: #c2410c;' : 'color: #2563eb;';
+                        let dateColor = esAbonoSolidario ? 'color: #ea580c;' : 'color: #666;';
+
                         valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                        <span style="font-size: 7px; color: #666;">${fechaSemanaObj.toLocaleDateString('es-MX', {day:'2-digit', month:'2-digit'})}</span>
-                                        <span style="font-weight: bold; font-size: 10px; color: #2563eb;">$${formatoMoneda(montoTotalSemana)}</span>
+                                        <span style="font-size: 7px; ${dateColor}">${fechaSemanaObj.toLocaleDateString('es-MX', {day:'2-digit', month:'2-digit'})}</span>
+                                        <span style="font-weight: bold; font-size: 10px; ${textColor}">$${formatoMoneda(montoTotalSemana)}</span>
                                       </div>`;
                         sumasSemanalesMod[w] += montoTotalSemana;
                     }
                 }
-                tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle;">${valorCelda}</td>`;
+                tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}">${valorCelda}</td>`;
             }
             let sfVal = '';
             if (llena) sfVal = `$${formatoMoneda(credito.saldoPendiente)}`;
@@ -381,14 +386,28 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
             `;
             let totalSolidarios = 0;
+            const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
+
             for(let w = 1; w <= maxSemanas; w++){
                 let bgStyle = (w >= 14) ? 'background-color: #dbe5f1;' : '';
                 let valorCelda = '';
-                if (llena && credito.pagos) {
-                    const pagoSol = credito.pagos.find(p => p.numeroPago === w && p.pagoSolidario === true);
-                    if (pagoSol && pagoSol.montoPagado > 0) {
-                        valorCelda = `$${formatoMoneda(pagoSol.montoPagado)}`;
-                        totalSolidarios += pagoSol.montoPagado;
+                if (llena && contributorId) {
+                    let montoAportadoPorElMiembro = 0;
+
+                    for (const otroCredito of creditos) {
+                        if (otroCredito.pagos) {
+                            const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === w && p.pagoSolidario === true);
+                            for (const pSol of pagosSolSemana) {
+                                if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
+                                    montoAportadoPorElMiembro += pSol.montoPagado;
+                                }
+                            }
+                        }
+                    }
+
+                    if (montoAportadoPorElMiembro > 0) {
+                        valorCelda = `$${formatoMoneda(montoAportadoPorElMiembro)}`;
+                        totalSolidarios += montoAportadoPorElMiembro;
                     }
                 }
                 tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
@@ -476,7 +495,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
         let credito = creditos.find(c => c.ciclo == ciclo);
         
         if (!credito && creditos.length > 0) {
-            // Fallback if the DB didn't save the cycle correctly or it mismatches
+            // Fallback si la BD no guardo el ciclo
             credito = creditos[0]; 
         }
 
@@ -498,7 +517,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
             const baseDate = new Date(fechaInicio);
             
-            // Adjust base date timezone properly by adding timezone offset to avoid previous day bug
+            // Ajustar fecha base
             baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
 
             for (let i = 0; i < semanas; i++) {
@@ -520,7 +539,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 }
 
                 const saldoInicialRow = currentSaldo;
-                // Si está llena, restamos el pago real (si existe). Si no, restamos el pactado para el plan teórico.
+                // Si está llena, restar el pago real (si existe). Si no, restar el pactado para el plan teórico.
                 const pagoParaSaldo = llena ? (foundPayment ? pagoReal : 0) : pagoPactado;
                 const saldoFinalRow = saldoInicialRow - pagoParaSaldo > 0 ? saldoInicialRow - pagoParaSaldo : 0;
 
@@ -570,7 +589,25 @@ exports.generarHojaControlIndividual = async (req, res) => {
         const saldoInicial = formatoMoneda(credito.saldoTotal || 0);
         const garantia = formatoMoneda(credito.garantia || 0);
         const pagoPactado = formatoMoneda(credito.pagoPactado || 0);
-        const periodoPago = "SEMANAL";
+        const periodoPago = (credito.frecuenciaPago || "SEMANAL").toUpperCase();
+        
+        let grupoOpcionalHtml = '';
+        if (credito.grupoOpcional && credito.grupoOpcional.trim() !== '') {
+            grupoOpcionalHtml = `
+                <div style="display: flex; margin-bottom: 5px;">
+                    <div style="width: 150px; text-align: right; padding-right: 10px;">GRUPO:</div>
+                    <div style="font-weight: normal; text-transform: uppercase;">${credito.grupoOpcional}</div>
+                </div>`;
+        }
+
+        let garantiaPredialHtml = '';
+        if (credito.garantiaPredial && credito.garantiaPredial.trim() !== '') {
+            garantiaPredialHtml = `
+                <div style="display: flex; margin-bottom: 5px;">
+                    <div style="width: 150px; text-align: right; padding-right: 10px;">GTIA PREDIAL/HIPOT:</div>
+                    <div style="font-weight: normal; text-transform: uppercase;">${credito.garantiaPredial}</div>
+                </div>`;
+        }
         
         // Obtener el día de la semana de fechaBasica
         const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
@@ -588,6 +625,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         htmlCompleto = htmlCompleto
             .replace('{{clienteNombre}}', nombreCliente)
+            .replace('{{grupoOpcionalHtml}}', grupoOpcionalHtml)
+            .replace('{{garantiaPredialHtml}}', garantiaPredialHtml)
             .replace('{{ciclo}}', ciclo)
             .replace('{{saldoInicial}}', saldoInicial)
             .replace('{{garantia}}', garantia)

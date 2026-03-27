@@ -8,9 +8,13 @@ const clienteSchema = new mongoose.Schema({
     },
     grupo: {
         type: String,
-        required: true
+        required: false
     },
     diaPago: {
+        type: String,
+        required: true
+    },
+    tipoPago: {
         type: String,
         required: true
     },

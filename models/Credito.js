@@ -60,6 +60,9 @@ const creditoSchema = new mongoose.Schema({
     tasaInteres: { type: Number, required: true },
     montoSolicitado: { type: Number, required: true },
     frecuenciaPago: { type: String, required: true },
+    garantiaPredial: { type: String, required: false },
+    equivalenciaMeses: { type: Number, required: false },
+    grupoOpcional: { type: String, required: false }
 
 }, { timestamps: true });
 

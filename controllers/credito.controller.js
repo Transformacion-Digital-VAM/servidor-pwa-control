@@ -24,28 +24,32 @@ exports.crearCredito = async (req, res) => {
         } = req.body;
 
         const garantiaCalculada = montoSolicitado * 0.05;
-        const pagoPactado = montoSolicitado / 16;
+        // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a /16
+        const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / 16);
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
             if (!cliente) {
                 return res.status(400).json({ ok: false, msg: 'Para un crédito Individual debe seleccionar un Cliente' });
             }
-            // Limpiamos miembro por seguridad si venía algo
+            // Limpiar miembro
             req.body.miembro = null;
         } else {
             // Si es CC, R o 8S (Grupales)
             if (!miembro) {
                 return res.status(400).json({ ok: false, msg: 'Para este tipo de crédito debe seleccionar un Miembro del grupo' });
             }
-            // Limpiamos cliente por seguridad
+            // Limpiar cliente
             req.body.cliente = null;
         }
 
         // Validar semanas
-        const numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
+        let numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
+        if (tipoCredito === 'R') {
+            numSemanas = 16;
+        }
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
             ? req.body.saldoTotal
-            : (pagoPactado * numSemanas);
+            : (pagoPactadoCalc * numSemanas);
 
         const mongoose = require('mongoose');
         const nuevoCredito = new Credito({
@@ -54,7 +58,7 @@ exports.crearCredito = async (req, res) => {
             ciclo,
             tipoCredito,
             semanas: numSemanas,
-            pagoPactado,
+            pagoPactado: pagoPactadoCalc,
             saldoTotal: saldoTotalCalc,
             saldoPendiente: saldoTotalCalc,
             garantia: garantiaCalculada,
@@ -65,6 +69,10 @@ exports.crearCredito = async (req, res) => {
                 pagosAhorro: []
             },
             fechaPrimerPago,
+            frecuenciaPago: req.body.frecuenciaPago || 'Semanal',
+            garantiaPredial: req.body.garantiaPredial || '',
+            equivalenciaMeses: req.body.equivalenciaMeses || 4,
+            grupoOpcional: req.body.grupoOpcional || '',
             pagos: []
         });
 
@@ -215,10 +223,10 @@ exports.eliminarCredito = async (req, res) => {
 // REGISTRAR PAGO
 exports.registrarPago = async (req, res) => {
     try {
-        const { id } = req.params; // ID del crédito desde el cual se registra el pago (contexto del que paga)
-        const { montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId } = req.body;
+        const { id } = req.params; // ID del crédito desde el cual se registra el pago 
+        const { montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, metodoPago } = req.body;
 
-        // 1. Obtener el crédito de quien está físicamente entregando el dinero (el que está en la URL)
+        // 1. Obtener el crédito 
         const creditoOrigen = await Credito.findById(id);
         if (!creditoOrigen) {
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
@@ -241,7 +249,8 @@ exports.registrarPago = async (req, res) => {
                 numeroPago,
                 montoPagado,
                 fechaPago: fechaPago || new Date(),
-                pagoSolidario: false
+                pagoSolidario: false,
+                metodoPago: metodoPago || 'Efectivo'
             };
 
             creditoOrigen.pagos.push(nuevoPago);
@@ -270,7 +279,7 @@ exports.registrarPago = async (req, res) => {
                 return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro)' });
             }
 
-            // Buscamos el crédito activo del beneficiario
+            // Buscar el crédito activo del beneficiario
             creditoDestino = await Credito.findOne({ miembro: beneficiarioId, estado: 'Activo' });
 
             if (!creditoDestino) {
@@ -316,9 +325,10 @@ exports.registrarPago = async (req, res) => {
             montoPagado,
             fechaPago: fechaPago || new Date(),
             pagoSolidario: pagoSolidario || false,
-            // 'miembro' en el subdocumento Pago siempre es el dueño de la DEUDA (el beneficiario)
+            metodoPago: metodoPago || 'Efectivo',
+            // 'miembro' en el subdocumento Pago siempre es el beneficiario
             miembro: creditoDestino.miembro,
-            // 'quienPrestoSolidario' es la persona de la URL (quien puso el dinero)
+            // 'quienPrestoSolidario' 
             quienPrestoSolidario: pagoSolidario ? creditoOrigen.miembro : undefined
         };
 
