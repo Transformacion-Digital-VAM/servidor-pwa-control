@@ -16,14 +16,14 @@ exports.crearCredito = async (req, res) => {
             tipoCredito,
             pagoPactado,
             semanas,
-            garantia,
+            //garantia,
             ahorro,
             fechaPrimerPago,
             tasaInteres,
             montoSolicitado
         } = req.body;
 
-        const garantiaCalculada = montoSolicitado * (garantia / 100);
+        const garantiaCalculada = montoSolicitado * 0.05;
         // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a /16
         const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / 16);
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
@@ -61,7 +61,7 @@ exports.crearCredito = async (req, res) => {
             pagoPactado: pagoPactadoCalc,
             saldoTotal: saldoTotalCalc,
             saldoPendiente: saldoTotalCalc,
-            garantia: garantiaCalculada,
+            garantia,
             tasaInteres,
             montoSolicitado,
             ahorro: {
