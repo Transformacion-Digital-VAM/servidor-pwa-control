@@ -119,13 +119,11 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 maximumFractionDigits: 2
             });
 
-        const generarCalendario = (fechaInicio, semanas, isRefill = false) => {
+        const generarCalendario = (fechaInicio, semanas, isRefill = false, frec = 'semanal') => {
             const fechas = [];
             const base = new Date(fechaInicio);
             // Desfase de zona horaria
             base.setMinutes(base.getMinutes() + base.getTimezoneOffset());
-
-            const frec = (creditosSubGrupo.length > 0 && creditosSubGrupo[0].frecuenciaPago) ? creditosSubGrupo[0].frecuenciaPago.toLowerCase() : 'semanal';
 
             for (let i = 0; i < semanas; i++) {
                 let nueva;
@@ -186,7 +184,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
             const fechaBasica = creditosSubGrupo.length > 0 ? creditosSubGrupo[0].fechaPrimerPago : new Date();
-            const calendario = generarCalendario(fechaBasica, maxSemanas, esRefill);
+            const frecGrupo = (creditosSubGrupo.length > 0 && creditosSubGrupo[0].frecuenciaPago) ? creditosSubGrupo[0].frecuenciaPago.toLowerCase() : 'semanal';
+            const calendario = generarCalendario(fechaBasica, maxSemanas, esRefill, frecGrupo);
 
             let tablaThead = `<tr>
             <th rowspan="2" width="2%">NO.</th>
@@ -477,6 +476,20 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             const claveGrupo = grupo?.clave || "________________";
 
+            // Calcular tasa general (moda de tasaInteres en el subgrupo)
+            let maxFreq = 0;
+            let tasaGeneralModa = 0;
+            const freqMap = {};
+            creditosSubGrupo.forEach(c => {
+                if (c.tasaInteres != null) {
+                    freqMap[c.tasaInteres] = (freqMap[c.tasaInteres] || 0) + 1;
+                    if (freqMap[c.tasaInteres] > maxFreq) {
+                        maxFreq = freqMap[c.tasaInteres];
+                        tasaGeneralModa = c.tasaInteres;
+                    }
+                }
+            });
+
             // REEMPLAZAR VARIABLES
             let seccionBody = bodyTemplate
                 .replace('{{grupoNombre}}', grupoNombre)
@@ -484,6 +497,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 .replace('{{clave}}', claveGrupo)
                 .replace('{{horaVisita}}', horaVisita)
                 .replace('{{ciclo}}', ciclo)
+                .replace('{{tasaGeneral}}', `${tasaGeneralModa}%`)
                 .replace('{{tablaThead}}', tablaThead)
                 .replace('{{tablaTbody}}', tablaTbody)
                 .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
@@ -656,6 +670,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
         const saldoInicial = formatoMoneda(credito.saldoTotal || 0);
         const garantia = formatoMoneda(credito.garantia || 0);
         const pagoPactado = formatoMoneda(credito.pagoPactado || 0);
+        const tasaInteres = (credito.tasaInteres || 0);
         const periodoPago = (credito.frecuenciaPago || "SEMANAL").toUpperCase();
 
         let grupoOpcionalHtml = '';
@@ -698,6 +713,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             .replace('{{saldoInicial}}', saldoInicial)
             .replace('{{garantia}}', garantia)
             .replace('{{periodoPago}}', periodoPago)
+            .replace('{{tasaInteres}}', tasaInteres)
             .replace('{{numPagos}}', maxSemanas)
             .replace('{{diaPago}}', diaPago)
             .replace('{{pagoPactado}}', pagoPactado)
