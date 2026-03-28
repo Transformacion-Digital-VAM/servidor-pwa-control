@@ -125,9 +125,27 @@ exports.generarHojaControlGrupal = async (req, res) => {
             // Desfase de zona horaria
             base.setMinutes(base.getMinutes() + base.getTimezoneOffset());
 
+            const frec = (creditosSubGrupo.length > 0 && creditosSubGrupo[0].frecuenciaPago) ? creditosSubGrupo[0].frecuenciaPago.toLowerCase() : 'semanal';
+
             for (let i = 0; i < semanas; i++) {
-                const nueva = new Date(base);
-                nueva.setDate(base.getDate() + i * 7);
+                let nueva;
+                if (frec === 'mensual') {
+                    const temp = new Date(base);
+                    const targetDay = temp.getDate();
+                    temp.setMonth(temp.getMonth() + i);
+                    if (temp.getDate() !== targetDay) { temp.setDate(0); }
+                    nueva = temp;
+                } else if (frec === 'quincenal') {
+                    nueva = new Date(base);
+                    nueva.setDate(base.getDate() + (i * 15));
+                } else if (frec === 'bisemanal') {
+                    nueva = new Date(base);
+                    nueva.setDate(base.getDate() + (i * 14));
+                } else {
+                    nueva = new Date(base);
+                    nueva.setDate(base.getDate() + (i * 7));
+                }
+
                 fechas.push({
                     numero: isRefill ? i + 9 : i + 1,
                     fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -552,9 +570,26 @@ exports.generarHojaControlIndividual = async (req, res) => {
             // Ajustar fecha base
             baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
 
+            const frecuencia = (credito.frecuenciaPago || "Semanal").toLowerCase();
+
             for (let i = 0; i < semanas; i++) {
-                const nueva = new Date(baseDate);
-                nueva.setDate(baseDate.getDate() + i * 7);
+                let nueva;
+                if (frecuencia === 'mensual') {
+                    const temp = new Date(baseDate);
+                    const targetDay = temp.getDate();
+                    temp.setMonth(temp.getMonth() + i);
+                    if (temp.getDate() !== targetDay) { temp.setDate(0); }
+                    nueva = temp;
+                } else if (frecuencia === 'quincenal') {
+                    nueva = new Date(baseDate);
+                    nueva.setDate(baseDate.getDate() + (i * 15));
+                } else if (frecuencia === 'bisemanal') {
+                    nueva = new Date(baseDate);
+                    nueva.setDate(baseDate.getDate() + (i * 14));
+                } else {
+                    nueva = new Date(baseDate);
+                    nueva.setDate(baseDate.getDate() + (i * 7));
+                }
 
                 const fechaStr = nueva.toLocaleDateString('es-MX', {
                     day: '2-digit', month: '2-digit', year: 'numeric'

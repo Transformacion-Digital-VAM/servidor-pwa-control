@@ -12,11 +12,11 @@ const clienteSchema = new mongoose.Schema({
     },
     diaPago: {
         type: String,
-        enum: ['Mensual', 'Quincenal', 'Semanal', 'Bisemanal'],
         required: true
     },
     tipoPago: {
         type: String,
+        enum: ['Mensual', 'Quincenal', 'Semanal', 'Bisemanal'],
         required: true
     },
     coordinacion: {
