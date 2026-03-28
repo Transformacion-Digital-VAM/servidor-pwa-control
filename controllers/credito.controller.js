@@ -16,16 +16,14 @@ exports.crearCredito = async (req, res) => {
             tipoCredito,
             pagoPactado,
             semanas,
-            garantia, // Se recibe como porcentaje (ej. 5, 8, 10)
+            //garantia,
             ahorro,
             fechaPrimerPago,
             tasaInteres,
             montoSolicitado
         } = req.body;
 
-        // Si el cliente mandó otro porcentaje en 'garantia', lo usamos. Si no, usamos 5% (0.05).
-        const porcentajeReq = garantia != null ? (Number(garantia) / 100) : 0.05;
-        const garantiaCalculada = montoSolicitado * porcentajeReq;
+        //const garantiaCalculada = montoSolicitado * 0.05;
         // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a /16
         const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / 16);
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
@@ -63,7 +61,7 @@ exports.crearCredito = async (req, res) => {
             pagoPactado: pagoPactadoCalc,
             saldoTotal: saldoTotalCalc,
             saldoPendiente: saldoTotalCalc,
-            garantia: garantiaCalculada,
+            garantia,
             tasaInteres,
             montoSolicitado,
             ahorro: {
