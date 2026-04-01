@@ -12,6 +12,10 @@ const creditoSchema = new mongoose.Schema({
         required: false
     },
     ciclo: { type: Number, required: false },
+    semanaActual: {
+        type: String,
+        required: true
+    },
     tipoCredito: {
         type: String,
         enum: ['CC', 'R', '8S', 'Individual'],

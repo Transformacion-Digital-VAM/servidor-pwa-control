@@ -23,7 +23,7 @@ exports.crearCredito = async (req, res) => {
             montoSolicitado
         } = req.body;
 
-        const garantiaCalculada = montoSolicitado * 0.05;
+        const garantiaCalculada = montoSolicitado * 0.10;
         // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a /16
         const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / 16);
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
@@ -73,7 +73,8 @@ exports.crearCredito = async (req, res) => {
             garantiaPredial: req.body.garantiaPredial || '',
             equivalenciaMeses: req.body.equivalenciaMeses || 4,
             grupoOpcional: req.body.grupoOpcional || '',
-            pagos: []
+            pagos: [],
+            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, req.body.frecuenciaPago || 'Semanal')
         });
 
         await nuevoCredito.save();
@@ -216,6 +217,101 @@ exports.eliminarCredito = async (req, res) => {
         res.status(500).json({
             ok: false,
             msg: 'Error al eliminar crédito'
+        });
+    }
+};
+
+// REFILL / CONVERTIR A REFILL
+exports.convertirARefill = async (req, res) => {
+    try {
+        const { id } = req.params; // ID del crédito viejo (CC o Individual)
+        const {
+            montoSolicitado,
+            pagoPactado,
+            semanas, // Si envían que va a ser a 16 semanas, etc.
+            saldoTotal,
+            tasaInteres
+        } = req.body;
+
+        // 1. Obtener crédito viejo
+        const creditoViejo = await Credito.findById(id);
+
+        if (!creditoViejo) {
+            return res.status(404).json({ ok: false, msg: 'Crédito original no encontrado' });
+        }
+
+        if (creditoViejo.estado === 'Liquidado') {
+            return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado, no se puede convertir a Refill' });
+        }
+
+        // 2. Calcular semana actual del viejo (momento en que se hace Refill)
+        const semanaInicioRefill = req.body.semanaActual || calcularSemanaActual(creditoViejo.fechaPrimerPago, creditoViejo.frecuenciaPago, new Date());
+
+        // 3. Variables calculadas para el Refill
+        const numSemanas = semanas || 16;
+        const pagoPactadoCalc = pagoPactado || (montoSolicitado / (numSemanas - parseInt(semanaInicioRefill) + 1)); 
+        const saldoTotalCalc = saldoTotal || (pagoPactadoCalc * numSemanas);
+        const garantiaCalculada = montoSolicitado * 0.10;
+
+        // 4. Crear el nuevo crédito 'Refill' (R)
+        const mongoose = require('mongoose');
+
+        const nuevoCredito = new Credito({
+            miembro: creditoViejo.miembro,
+            cliente: creditoViejo.cliente,
+            ciclo: creditoViejo.ciclo,
+            tipoCredito: 'R', // Convertimos a Refill
+            semanas: numSemanas,    // Mantenemos o cambiamos total de semanas (ej: 16)
+            pagoPactado: pagoPactadoCalc,
+            saldoTotal: saldoTotalCalc,
+            saldoPendiente: saldoTotalCalc,
+            garantia: garantiaCalculada, // Nueva garantia calculada al monto solicitado
+            tasaInteres: tasaInteres || creditoViejo.tasaInteres,
+            montoSolicitado,
+            ahorro: {
+                montoTotal: creditoViejo.ahorro ? creditoViejo.ahorro.montoTotal : 0, 
+                // Decidí heredar el total del ahorro. En pagosAhorro puedes heredarlo o dejarlo vacío
+                pagosAhorro: creditoViejo.ahorro ? creditoViejo.ahorro.pagosAhorro : []
+            },
+            fechaPrimerPago: creditoViejo.fechaPrimerPago, // Mantenemos la primera fecha histórica
+            frecuenciaPago: creditoViejo.frecuenciaPago,
+            garantiaPredial: creditoViejo.garantiaPredial,
+            equivalenciaMeses: creditoViejo.equivalenciaMeses,
+            grupoOpcional: creditoViejo.grupoOpcional,
+            pagos: [], // Limpiamos pagos para que la nueva hoja inicie sin marcas de pagos Refill
+            semanaActual: semanaInicioRefill // La semana en que inició este Refill
+        });
+
+        await nuevoCredito.save();
+
+        // 5. Liquidamos el crédito viejo
+        creditoViejo.estado = 'Liquidado';
+        // Podrías poner también un saldoPendiente viejo = 0 si lo deseas, 
+        // pero liquidarlo suele ser suficiente para que ya no salga en cobros de Activo.
+        // creditoViejo.saldoPendiente = 0; 
+        await creditoViejo.save();
+
+        res.status(201).json({
+            ok: true,
+            msg: 'Crédito convertido a Refill correctamente',
+            creditoAnterior: creditoViejo,
+            nuevoCreditoRefill: nuevoCredito
+        });
+
+    } catch (error) {
+        // En caso de que truene el unique index (miembro, ciclo, tipoCredito) por hacer 2 refills, 
+        // puedes manejarlo como un error particular aquí
+        if (error.code === 11000) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'Ya existe un crédito Refill para este miembro en este ciclo.',
+                error: error.message
+            });
+        }
+        res.status(500).json({
+            ok: false,
+            msg: 'Error al convertir a Refill',
+            error: error.message
         });
     }
 };
@@ -423,6 +519,36 @@ function generarCalendarioPagos(fechaPrimerPago, semanas) {
     }
 
     return fechas;
+}
+
+// helper interno para calcular semana actual (o periodo actual)
+function calcularSemanaActual(fechaPrimerPago, frecuenciaPago, fechaReferencia = new Date()) {
+    if (!fechaPrimerPago) return "1";
+
+    const fPrimerPago = new Date(fechaPrimerPago);
+    const fActual = new Date(fechaReferencia);
+    
+    // Normalizar horas para evitar problemas de desfase horario
+    fPrimerPago.setUTCHours(0, 0, 0, 0);
+    fActual.setUTCHours(0, 0, 0, 0);
+
+    const diferenciaMilisegundos = fActual.getTime() - fPrimerPago.getTime();
+    const diasTranscurridos = Math.floor(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
+    
+    let divisorDias = 7; // Semanal por defecto
+    if(frecuenciaPago === 'Quincenal' || frecuenciaPago === 'Bisemanal') {
+        divisorDias = 14; 
+    } else if (frecuenciaPago === 'Mensual') {
+        divisorDias = 30;
+    }
+
+    if (diasTranscurridos <= 0) {
+        return "1"; // Si todavía no llega la fecha del primer pago
+    }
+
+    // Calcula cuántos periodos han pasado
+    const periodoActual = Math.floor(diasTranscurridos / divisorDias) + 1;
+    return periodoActual.toString();
 }
 
 /*
