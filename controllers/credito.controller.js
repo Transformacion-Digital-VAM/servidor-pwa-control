@@ -52,20 +52,25 @@ exports.crearCredito = async (req, res) => {
             : (pagoPactadoCalc * numSemanas);
 
         const mongoose = require('mongoose');
-        const nuevoCredito = new Credito({
+        const query = {
             miembro: tipoCredito !== 'Individual' ? miembro : new mongoose.Types.ObjectId(),
-            cliente: tipoCredito === 'Individual' ? cliente : null,
             ciclo,
-            tipoCredito,
+            tipoCredito
+        };
+
+        const dataToSave = {
+            cliente: tipoCredito === 'Individual' ? cliente : null,
             semanas: numSemanas,
             pagoPactado: pagoPactadoCalc,
             saldoTotal: saldoTotalCalc,
-            saldoPendiente: saldoTotalCalc,
+            // Si es nuevo o no tiene saldo, lo inicializamos. Si ya existe, no solemos resetear saldoPendiente si ya hay pagos.
+            // Para simplificar el "re-save" del admin:
+            saldoPendiente: saldoTotalCalc, 
             garantia: garantiaCalculada,
             tasaInteres,
             montoSolicitado,
             ahorro: {
-                montoTotal: ahorro,
+                montoTotal: ahorro || 0,
                 pagosAhorro: []
             },
             fechaPrimerPago,
@@ -73,25 +78,32 @@ exports.crearCredito = async (req, res) => {
             garantiaPredial: req.body.garantiaPredial || '',
             equivalenciaMeses: req.body.equivalenciaMeses || 4,
             grupoOpcional: req.body.grupoOpcional || '',
-            pagos: [],
             semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, req.body.frecuenciaPago || 'Semanal')
-        });
+        };
 
-        await nuevoCredito.save();
+        // Intentar buscar y actualizar, si no existe, crear (upsert)
+        // El unique index es en {miembro, ciclo, tipoCredito}.
+        const creditoGuardado = await Credito.findOneAndUpdate(
+            { miembro: query.miembro, ciclo: query.ciclo, tipoCredito: query.tipoCredito },
+            { $set: dataToSave },
+            { upsert: true, new: true, runValidators: true }
+        );
 
         res.status(201).json({
             ok: true,
-            credito: nuevoCredito
+            credito: creditoGuardado
         });
 
     } catch (error) {
+        console.error('Error en crearCredito:', error);
         res.status(500).json({
             ok: false,
-            msg: 'Error al crear crédito',
+            msg: 'Error al crear o actualizar crédito',
             error: error.message
         });
     }
 };
+
 
 
 // READ ALL
