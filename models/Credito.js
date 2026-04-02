@@ -37,6 +37,7 @@ const creditoSchema = new mongoose.Schema({
         fechaPago: { type: Date, default: Date.now },
         pagoSolidario: { type: Boolean, default: false },
         metodoPago: { type: String, required: true },
+        totalPagado: { type: Number, required: true },
         miembro: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Miembro',

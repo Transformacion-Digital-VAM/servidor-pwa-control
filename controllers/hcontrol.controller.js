@@ -119,7 +119,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 maximumFractionDigits: 2
             });
 
-        const generarCalendario = (fechaInicio, semanas, isRefill = false, frec = 'semanal') => {
+        const generarCalendario = (fechaInicio, semanas, semanaInicioReal = 1, frec = 'semanal') => {
             const fechas = [];
             const base = new Date(fechaInicio);
             // Desfase de zona horaria
@@ -145,7 +145,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 }
 
                 fechas.push({
-                    numero: isRefill ? i + 9 : i + 1,
+                    numero: semanaInicioReal + i,
                     fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
                 });
             }
@@ -179,13 +179,25 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 maxSemanas = creditosSubGrupo[0].semanas;
             }
 
+            const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
+            
+            let semanaInicioReal = 1;
+            if (esRefill) {
+                // Toma la semanaActual configurada en el crédito (o 9 por defecto)
+                semanaInicioReal = parseInt(creditosSubGrupo[0].semanaActual) || 9;
+                
+                // Restamos las semanas para obtener cuántas quedan
+                // Ej: total 16, inicio 9 -> 16 - 9 + 1 = 8 semanas a renderizar
+                maxSemanas = maxSemanas - semanaInicioReal + 1;
+                if (maxSemanas <= 0) maxSemanas = 1; 
+            }
+
             const llena = req.query.llena === 'true';
             const sumasSemanalesMod = new Array(maxSemanas).fill(0);
 
-            const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
             const fechaBasica = creditosSubGrupo.length > 0 ? creditosSubGrupo[0].fechaPrimerPago : new Date();
             const frecGrupo = (creditosSubGrupo.length > 0 && creditosSubGrupo[0].frecuenciaPago) ? creditosSubGrupo[0].frecuenciaPago.toLowerCase() : 'semanal';
-            const calendario = generarCalendario(fechaBasica, maxSemanas, esRefill, frecGrupo);
+            const calendario = generarCalendario(fechaBasica, maxSemanas, semanaInicioReal, frecGrupo);
 
             let tablaThead = `<tr>
             <th rowspan="2" width="2%">NO.</th>
@@ -235,8 +247,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     let valorCelda = '';
                     let tdBgStyle = '';
                     if (llena && credito.pagos) {
-                        // Agrupar todos los pagos de esa misma semana (numeroPago)
-                        const pagosSemana = credito.pagos.filter(p => p.numeroPago === w + 1);
+                        // El calendario.numero representa la semana real (ej. 9, 10...)
+                        const semanaNumeroActual = calendario[w].numero;
+                        // Agrupar todos los pagos de esa misma semana
+                        const pagosSemana = credito.pagos.filter(p => p.numeroPago === semanaNumeroActual);
 
                         if (pagosSemana.length > 0) {
                             const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
@@ -333,7 +347,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <th width="10%">GARANTIA<br>INICIAL</th>
                 <th width="14%">NOMBRE DEL CLIENTE</th>`;
             for (let w = 1; w <= maxSemanas; w++) {
-                const lbl = esRefill ? w + 8 : w;
+                const lbl = semanaInicioReal + w - 1;
                 tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
             }
             tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
@@ -361,10 +375,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
             `;
                 for (let w = 1; w <= maxSemanas; w++) {
-                    let label = esRefill ? w + 8 : w;
+                    let label = semanaInicioReal + w - 1;
                     let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
                     let valorCelda = '';
                     if (llena && credito.ahorro && credito.ahorro.pagosAhorro) {
+                        // El índice en pagosAhorro es w-1 si corresponde al tiempo real transcurrido
+                        // Si la matriz de ahorro guarda desde 0. Así que lo dejamos mapeado al loop actual w-1
                         const ahorro = credito.ahorro.pagosAhorro[w - 1];
                         if (ahorro && ahorro.monto > 0) {
                             valorCelda = `${formatoMoneda(ahorro.monto)}`;
@@ -388,7 +404,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <td align="right" style="font-weight:bold; padding-right:10px;">TOTAL</td>
         `;
             for (let w = 1; w <= maxSemanas; w++) {
-                let label = esRefill ? w + 8 : w;
+                let label = semanaInicioReal + w - 1;
                 let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
                 tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
             }
@@ -404,7 +420,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <th width="8%">CARGO</th>
                 <th width="14%">NOMBRE DEL CLIENTE</th>`;
             for (let w = 1; w <= maxSemanas; w++) {
-                const lbl = esRefill ? w + 8 : w;
+                const lbl = semanaInicioReal + w - 1;
                 tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
             }
             tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
@@ -430,7 +446,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
 
                 for (let w = 1; w <= maxSemanas; w++) {
-                    let label = esRefill ? w + 8 : w;
+                    let label = semanaInicioReal + w - 1;
                     let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
                     let valorCelda = '';
                     if (llena && contributorId) {
@@ -438,7 +454,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                         for (const otroCredito of creditosSubGrupo) {
                             if (otroCredito.pagos) {
-                                const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === w && p.pagoSolidario === true);
+                                // Buscar pagos solidarios que coincidan con la semana (label)
+                                const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === label && p.pagoSolidario === true);
                                 for (const pSol of pagosSolSemana) {
                                     if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
                                         montoAportadoPorElMiembro += pSol.montoPagado;
@@ -464,7 +481,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 <td colspan="3" align="right" style="font-weight:bold; padding-right:10px; padding: 5px 0;">TOTAL</td>
         `;
             for (let w = 1; w <= maxSemanas; w++) {
-                let label = esRefill ? w + 8 : w;
+                let label = semanaInicioReal + w - 1;
                 let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
                 tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
             }
@@ -573,10 +590,10 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 maximumFractionDigits: 2
             });
 
-        const generarCalendario = (fechaInicio, semanas) => {
+        const generarCalendario = (fechaInicio, semanasTotales, creditoActual) => {
             const fechas = [];
-            let currentSaldo = credito.saldoTotal;
-            const pagoPactado = credito.pagoPactado || 0;
+            let currentSaldo = creditoActual.saldoTotal || 0;
+            const pagoPactado = creditoActual.pagoPactado || 0;
             const llena = req.query.llena === 'true';
 
             const baseDate = new Date(fechaInicio);
@@ -584,9 +601,18 @@ exports.generarHojaControlIndividual = async (req, res) => {
             // Ajustar fecha base
             baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
 
-            const frecuencia = (credito.frecuenciaPago || "Semanal").toLowerCase();
+            const frecuencia = (creditoActual.frecuenciaPago || "Semanal").toLowerCase();
 
-            for (let i = 0; i < semanas; i++) {
+            // Calcular inicio de renderizado y total de semanas a mostrar
+            let semanaInicioReal = 1;
+            let semanasRender = semanasTotales;
+            if (creditoActual.tipoCredito === 'R') {
+                semanaInicioReal = parseInt(creditoActual.semanaActual) || 9;
+                semanasRender = semanasTotales - semanaInicioReal + 1;
+                if (semanasRender <= 0) semanasRender = 1;
+            }
+
+            for (let i = 0; i < semanasRender; i++) {
                 let nueva;
                 if (frecuencia === 'mensual') {
                     const temp = new Date(baseDate);
@@ -602,17 +628,22 @@ exports.generarHojaControlIndividual = async (req, res) => {
                     nueva.setDate(baseDate.getDate() + (i * 14));
                 } else {
                     nueva = new Date(baseDate);
-                    nueva.setDate(baseDate.getDate() + (i * 7));
+                    // Para los refill, sumamos el offset de las semanas ya cursadas si queremos que las fechas coincidan real
+                    // Pero asumo "baseDate" fue la histórica, por lo que multiplicarlo por i debe incluir el offset si queremos la fecha futura.
+                    // Para que la hoja individual empate, si baseDate es la fecha 1, y hoy es semana 9, multiplicamos por (semanaInicioReal - 1 + i) * 7
+                    // Pero antes usábamos (i*7). Lo ajusto porque si la baseDate es la fechaOriginal, la semana 9 debe ser dentro de 8 semanas
+                    nueva.setDate(baseDate.getDate() + ((semanaInicioReal - 1 + i) * 7));
                 }
 
                 const fechaStr = nueva.toLocaleDateString('es-MX', {
                     day: '2-digit', month: '2-digit', year: 'numeric'
                 });
 
+                const semanaNumeroActual = semanaInicioReal + i;
                 let pagoReal = 0;
                 let foundPayment = false;
-                if (credito.pagos) {
-                    const pagosSemana = credito.pagos.filter(p => p.numeroPago === i + 1);
+                if (creditoActual.pagos) {
+                    const pagosSemana = creditoActual.pagos.filter(p => p.numeroPago === semanaNumeroActual);
                     if (pagosSemana.length > 0) {
                         pagoReal = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
                         foundPayment = true;
@@ -625,7 +656,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 const saldoFinalRow = saldoInicialRow - pagoParaSaldo > 0 ? saldoInicialRow - pagoParaSaldo : 0;
 
                 fechas.push({
-                    numero: credito.tipoCredito === 'R' ? i + 9 : i + 1,
+                    numero: semanaNumeroActual,
                     fecha: fechaStr,
                     saldoInicial: saldoInicialRow,
                     pago: (llena && foundPayment) ? pagoReal : (llena ? 0 : pagoPactado),
@@ -641,7 +672,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         const maxSemanas = credito.semanas || 16;
         const fechaBasica = credito.fechaPrimerPago || new Date();
-        const amortizaciones = generarCalendario(fechaBasica, maxSemanas);
+        const amortizaciones = generarCalendario(fechaBasica, maxSemanas, credito);
 
         let tablaAmortizacionTbody = '';
         amortizaciones.forEach(row => {
@@ -714,7 +745,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             .replace('{{garantia}}', garantia)
             .replace('{{periodoPago}}', periodoPago)
             .replace('{{tasaInteres}}', tasaInteres)
-            .replace('{{numPagos}}', maxSemanas)
+            .replace('{{numPagos}}', amortizaciones.length)
             .replace('{{diaPago}}', diaPago)
             .replace('{{pagoPactado}}', pagoPactado)
             .replace('{{asesorNombre}}', asesorNombre)

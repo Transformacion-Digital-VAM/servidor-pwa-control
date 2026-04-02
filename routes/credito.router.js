@@ -12,7 +12,7 @@ router.delete('/:id', creditoController.eliminarCredito); //verifyToken
 
 // PAGOS
 router.post('/:id/pagos', creditoController.registrarPago); //verifyToken
-router.post('/:id/refill', creditoController.convertirARefill); //verifyToken
+// router.post('/:id/refill', creditoController.convertirARefill); //verifyToken
 router.post('/:id/garantia', creditoController.registrarAbonoGarantia); //verifyToken
 
 

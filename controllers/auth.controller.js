@@ -98,3 +98,26 @@ exports.updateLocation = async (req, res) => {
         res.status(500).json({ message: 'Error al actualizar ubicación', error });
     }
 };
+
+exports.getAllLocations = async (req, res) => {
+    try {
+        // Verificar si el usuario que hace la petición es 'master'
+        if (req.user.role !== 'master') {
+            return res.status(403).json({ 
+                message: 'Acceso denegado. Solo el rol master puede obtener ubicaciones de otros usuarios.' 
+            });
+        }
+
+        // Obtener usuarios que tengan ubicación registrada
+        // Excluimos la contraseña y enviamos solo info útil para el mapa/panel
+        const usersWithLocation = await User.find(
+            { lastLocation: { $exists: true, $ne: null } },
+            'username role coordinacion lastLocation'
+        );
+
+        res.status(200).json({ ok: true, users: usersWithLocation });
+    } catch (error) {
+        console.error('Error al obtener ubicaciones:', error);
+        res.status(500).json({ message: 'Error al obtener ubicaciones', error });
+    }
+};
