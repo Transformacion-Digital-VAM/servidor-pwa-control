@@ -127,21 +127,24 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             for (let i = 0; i < semanas; i++) {
                 let nueva;
+                // Calculamos el desplazamiento de periodos desde la semana 1
+                let offsetPeriodos = (semanaInicioReal - 1) + i;
+
                 if (frec === 'mensual') {
                     const temp = new Date(base);
                     const targetDay = temp.getDate();
-                    temp.setMonth(temp.getMonth() + i);
+                    temp.setMonth(temp.getMonth() + offsetPeriodos);
                     if (temp.getDate() !== targetDay) { temp.setDate(0); }
                     nueva = temp;
                 } else if (frec === 'quincenal') {
                     nueva = new Date(base);
-                    nueva.setDate(base.getDate() + (i * 15));
+                    nueva.setDate(base.getDate() + (offsetPeriodos * 15));
                 } else if (frec === 'bisemanal') {
                     nueva = new Date(base);
-                    nueva.setDate(base.getDate() + (i * 14));
+                    nueva.setDate(base.getDate() + (offsetPeriodos * 14));
                 } else {
                     nueva = new Date(base);
-                    nueva.setDate(base.getDate() + (i * 7));
+                    nueva.setDate(base.getDate() + (offsetPeriodos * 7));
                 }
 
                 fechas.push({
@@ -611,22 +614,23 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
             for (let i = 0; i < semanasRender; i++) {
                 let nueva;
+                let offsetPeriodos = (semanaInicioReal - 1) + i;
+
                 if (frecuencia === 'mensual') {
                     const temp = new Date(baseDate);
                     const targetDay = temp.getDate();
-                    temp.setMonth(temp.getMonth() + i);
+                    temp.setMonth(temp.getMonth() + offsetPeriodos);
                     if (temp.getDate() !== targetDay) { temp.setDate(0); }
                     nueva = temp;
                 } else if (frecuencia === 'quincenal') {
                     nueva = new Date(baseDate);
-                    nueva.setDate(baseDate.getDate() + (i * 15));
+                    nueva.setDate(baseDate.getDate() + (offsetPeriodos * 15));
                 } else if (frecuencia === 'bisemanal') {
                     nueva = new Date(baseDate);
-                    nueva.setDate(baseDate.getDate() + (i * 14));
+                    nueva.setDate(baseDate.getDate() + (offsetPeriodos * 14));
                 } else {
                     nueva = new Date(baseDate);
-                    // Usamos simplemente (i * 7) para que el calendario arranque en la fechaPrimerPago mandada
-                    nueva.setDate(baseDate.getDate() + (i * 7));
+                    nueva.setDate(baseDate.getDate() + (offsetPeriodos * 7));
                 }
 
                 const fechaStr = nueva.toLocaleDateString('es-MX', {
