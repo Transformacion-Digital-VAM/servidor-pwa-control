@@ -186,10 +186,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 // Toma la semanaActual configurada en el crédito (o 9 por defecto)
                 semanaInicioReal = parseInt(creditosSubGrupo[0].semanaActual) || 9;
                 
-                // Restamos las semanas para obtener cuántas quedan
-                // Ej: total 16, inicio 9 -> 16 - 9 + 1 = 8 semanas a renderizar
-                maxSemanas = maxSemanas - semanaInicioReal + 1;
-                if (maxSemanas <= 0) maxSemanas = 1; 
+                // Un Refill siempre durará 8 semanas (ej. 9-16, 17-24)
+                maxSemanas = 8;
             }
 
             const llena = req.query.llena === 'true';
@@ -608,8 +606,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             let semanasRender = semanasTotales;
             if (creditoActual.tipoCredito === 'R') {
                 semanaInicioReal = parseInt(creditoActual.semanaActual) || 9;
-                semanasRender = semanasTotales - semanaInicioReal + 1;
-                if (semanasRender <= 0) semanasRender = 1;
+                semanasRender = 8; // Un Refill siempre genera 8 semanas de hoja de control
             }
 
             for (let i = 0; i < semanasRender; i++) {
@@ -628,11 +625,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                     nueva.setDate(baseDate.getDate() + (i * 14));
                 } else {
                     nueva = new Date(baseDate);
-                    // Para los refill, sumamos el offset de las semanas ya cursadas si queremos que las fechas coincidan real
-                    // Pero asumo "baseDate" fue la histórica, por lo que multiplicarlo por i debe incluir el offset si queremos la fecha futura.
-                    // Para que la hoja individual empate, si baseDate es la fecha 1, y hoy es semana 9, multiplicamos por (semanaInicioReal - 1 + i) * 7
-                    // Pero antes usábamos (i*7). Lo ajusto porque si la baseDate es la fechaOriginal, la semana 9 debe ser dentro de 8 semanas
-                    nueva.setDate(baseDate.getDate() + ((semanaInicioReal - 1 + i) * 7));
+                    // Usamos simplemente (i * 7) para que el calendario arranque en la fechaPrimerPago mandada
+                    nueva.setDate(baseDate.getDate() + (i * 7));
                 }
 
                 const fechaStr = nueva.toLocaleDateString('es-MX', {

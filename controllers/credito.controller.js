@@ -188,7 +188,7 @@ exports.actualizarCredito = async (req, res) => {
             const montoSolicitado = datosActualizar.montoSolicitado || creditoOriginal.montoSolicitado;
             const semanaActual = datosActualizar.semanaActual || creditoOriginal.semanaActual || "1";
             const semanasTotal = datosActualizar.semanas || creditoOriginal.semanas || 16;
-            
+
             // Calculamos cuántas semanas le quedan al crédito (ej. de la 9 a la 16 = 8 semanas)
             let semanasRestantes = semanasTotal - parseInt(semanaActual) + 1;
             if (semanasRestantes <= 0) semanasRestantes = 1; // Prevenir división por cero
