@@ -182,9 +182,18 @@ exports.actualizarCredito = async (req, res) => {
 
         // --- AUTOMATIZACIÓN DE CÁLCULO PARA REFILL ---
         const esRefill = datosActualizar.tipoCredito === 'R' || creditoOriginal.tipoCredito === 'R';
-        const actualizarSaldos = datosActualizar.montoSolicitado || datosActualizar.tipoCredito === 'R';
+        
+        // Evitamos que los miembros que no actualizaron su crédito pierdan sus saldos y datos,
+        // verificando si hubo algún cambio real en los parámetros de su crédito.
+        const tipoCambio = datosActualizar.tipoCredito && datosActualizar.tipoCredito !== creditoOriginal.tipoCredito;
+        const montoCambio = datosActualizar.montoSolicitado && parseFloat(datosActualizar.montoSolicitado) !== parseFloat(creditoOriginal.montoSolicitado);
+        const semanaCambio = datosActualizar.semanaActual && parseInt(datosActualizar.semanaActual) !== parseInt(creditoOriginal.semanaActual || 1);
+        const semanasCambio = datosActualizar.semanas && parseInt(datosActualizar.semanas) !== parseInt(creditoOriginal.semanas || 16);
 
-        if (esRefill && actualizarSaldos) {
+        // Sólo recalculamos si cambiaron el tipo a Refill, o ajustaron el monto/semanas.
+        const esActualizacionReal = tipoCambio || montoCambio || semanaCambio || semanasCambio;
+
+        if (esRefill && esActualizacionReal) {
             const montoSolicitado = datosActualizar.montoSolicitado || creditoOriginal.montoSolicitado;
             const semanaActual = datosActualizar.semanaActual || creditoOriginal.semanaActual || "1";
             const semanasTotal = datosActualizar.semanas || creditoOriginal.semanas || 16;
@@ -193,16 +202,10 @@ exports.actualizarCredito = async (req, res) => {
             let semanasRestantes = semanasTotal - parseInt(semanaActual) + 1;
             if (semanasRestantes <= 0) semanasRestantes = 1; // Prevenir división por cero
 
-            // Si el frontend no mandó sus propios cálculos, los automatizamos:
-            if (!datosActualizar.pagoPactado) {
-                datosActualizar.pagoPactado = montoSolicitado / semanasRestantes;
-            }
-            if (!datosActualizar.saldoTotal) {
-                datosActualizar.saldoTotal = montoSolicitado;
-            }
-            if (!datosActualizar.saldoPendiente) {
-                datosActualizar.saldoPendiente = montoSolicitado;
-            }
+            // Si es Refill, forzamos automatización
+            datosActualizar.pagoPactado = montoSolicitado / semanasRestantes;
+            datosActualizar.saldoTotal = montoSolicitado;
+            datosActualizar.saldoPendiente = montoSolicitado;
         }
         // --- FIN AUTOMATIZACIÓN ---
 
