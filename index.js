@@ -17,12 +17,13 @@ const grupoRoutes = require('./routes/grupo.router');
 const miembroRoutes = require('./routes/miembro.routes');
 const clienteRoutes = require('./routes/cliente.router');
 const creditoRoutes = require('./routes/credito.router');
+const notificacionesRoutes = require('./routes/notificaciones.router');
 // Conectar a la base de datos
 connectDB();
 
 // Middleware
 app.use(cors({
-  origin: '*',
+  origin: ['*'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
@@ -36,6 +37,8 @@ app.use('/api/grupos', grupoRoutes);
 app.use('/api/miembros', miembroRoutes);
 app.use('/api/clientes', clienteRoutes);
 app.use('/api/creditos', creditoRoutes);
+app.use('/api/notificaciones', notificacionesRoutes);
+app.use('/api/notifications', notificacionesRoutes); // Alias, por si alguna petición usa la variante en inglés
 
 // Iniciar el servidor
 const PORT = process.env.PORT || 3000;
