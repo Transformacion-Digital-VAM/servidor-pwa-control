@@ -6,13 +6,13 @@
     <style>
         @page {
             size: portrait;
-            margin: 10mm;
+            margin: 15mm;
         }
 
         body {
             font-family: Arial, Helvetica, calibri, sans-serif;
             margin: 0;
-            padding: 6px;
+            padding: 10px;
             font-size: 11px;
         }
 
@@ -20,7 +20,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 25px;
         }
 
         .header-titles {
@@ -29,24 +29,22 @@
 
         .header-titles h2 {
             margin: 0;
-            font-size: 14px;
+            font-size: 16px;
             letter-spacing: 0.5px;
-            line-height: 1.15;
         }
 
         .header-titles h4 {
-            margin: 2px 0 0 0;
-            font-size: 10px;
+            margin: 5px 0 0 0;
+            font-size: 12px;
             font-weight: bold;
-            line-height: 1.1;
         }
 
         .header-logo img {
-            width: 140px;
+            width: 180px;
         }
 
         .info-container {
-            margin-bottom: 8px;
+            margin-bottom: 15px;
             font-size: 11px;
             font-weight: bold;
         }
@@ -60,29 +58,27 @@
         table.hoja {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 8px;
-            margin-bottom: 4px;
+            margin-top: 30px;
+            margin-bottom: 15px;
             page-break-inside: avoid;
         }
 
         table.hoja th,
         table.hoja td {
             border: 1px solid #000;
-            padding: 3px 2px;
+            padding: 8px 6px;
             text-align: center;
-            line-height: 1.1;
         }
 
         table.hoja th {
             background-color: white;
             font-family: 'Arial', sans-serif;
-            font-size: 9px;
+            font-size: 11px;
             font-weight: bold;
-            padding: 4px 2px;
         }
 
         table.hoja td {
-            font-size: 9px;
+            font-size: 11px;
         }
 
         .align-money {
@@ -94,7 +90,7 @@
         }
 
         .firma-section {
-            margin-top: 8px;
+            margin-top: 35px;
             text-align: center;
             width: 100%;
         }
@@ -103,29 +99,29 @@
             width: 300px;
             border-bottom: 1px solid #000;
             margin: 0 auto;
-            margin-bottom: 2px;
+            margin-bottom: 5px;
         }
 
         .firma-text {
-            font-size: 10px;
+            font-size: 11px;
         }
 
         .footer-text {
             display: flex;
             justify-content: space-between;
-            margin-top: 4px;
-            font-size: 10px;
+            margin-top: 20px;
+            font-size: 11px;
             font-weight: bold;
             font-family: 'Arial', sans-serif;
         }
 
         .footer-text p {
-            margin: 0px 0;
+            margin: 2px 0;
             padding: 0;
         }
 
         .bottom-wrapper {
-            margin-top: 3px;
+            margin-top: 20px;
             page-break-inside: avoid;
         }
     </style>
@@ -148,30 +144,30 @@
         <div style="display: flex; width: 100%;">
             <!-- Columna Izquierda -->
             <div style="width: 50%;">
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">NOMBRE DE CLIENTE:</div>
                     <div style="font-weight: normal; text-transform: uppercase;">{{clienteNombre}}</div>
                 </div>
                 {{grupoOpcionalHtml}}
                 {{garantiaPredialHtml}}
 
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">CICLO:</div>
                     <div style="font-weight: normal;">{{ciclo}}</div>
                 </div>
 
 
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">SALDO INICIAL:</div>
                     <div style="font-weight: normal;" class="money-val"><span>$</span> <span>{{saldoInicial}}</span>
                     </div>
                 </div>
 
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">GARANTIA:</div>
                     <div style="font-weight: normal;" class="money-val"><span>$</span> <span>{{garantia}}</span></div>
                 </div>
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">TASA DE INTERES:</div>
                     <div style="font-weight: normal;" class="money-val"><span></span> <span>{{tasaInteres}}%</span>
                     </div>
@@ -181,19 +177,19 @@
 
             <!-- Columna Derecha -->
             <div style="width: 50%;">
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">PERIODO DE PAGO:</div>
                     <div style="font-weight: normal; text-transform: uppercase;">{{periodoPago}}</div>
                 </div>
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">NO DE PAGOS:</div>
                     <div style="font-weight: normal;">{{numPagos}}</div>
                 </div>
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">DIA DE PAGO:</div>
                     <div style="font-weight: normal; text-transform: uppercase;">{{diaPago}}</div>
                 </div>
-                <div style="display: flex; margin-bottom: 2px;">
+                <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">PAGO PACTADO:</div>
                     <div style="font-weight: normal;" class="money-val"><span>$</span> <span>{{pagoPactado}}</span>
                     </div>
@@ -202,7 +198,7 @@
         </div>
 
         <!-- Fila Final -->
-        <div style="display: flex; margin-top: 4px;">
+        <div style="display: flex; margin-top: 15px;">
             <div style="width: 150px; text-align: right; padding-right: 10px;">NOMBRE DE ASESOR:</div>
             <div style="font-weight: normal; text-transform: uppercase;">{{asesorNombre}}</div>
         </div>
@@ -223,7 +219,7 @@
         </tbody>
     </table>
     <div class="bank-info"
-        style="border: 1px solid #000; display: flex; justify-content: space-around; background-color: #f9fafb; page-break-inside: avoid; padding: 2px; font-size: 9px; margin-top: 2px;">
+        style="margin-top: 10px; border: 1px solid #000; padding: 2px; font-size: 10px; display: flex; justify-content: space-around; background-color: #f9fafb; page-break-inside: avoid;">
         <div><b>BBVA</b>
             <br>
             <strong>CUENTA:</strong> 0116885780 &nbsp;
@@ -254,8 +250,8 @@
                 <p>REV 02-2025</p>
             </div>
             <div style="text-align: right;">
-                <p style="font-weight: normal; margin: 0;">Hoja 1 de 1</p>
-                <p style="margin: 3px 0 0 0; font-weight: bold;">FO-72</p>
+                <p style="font-weight: normal;">Hoja 1 de 1</p>
+                <p style="margin-top: 10px; font-weight: bold;">FO-72</p>
             </div>
         </div>
     </div>
