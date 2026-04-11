@@ -1,13 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const webpush = require('web-push');
-
-// Configurar VAPID keys
-webpush.setVapidDetails(
-    'mailto:' + process.env.VAPID_EMAIL,
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-);
 
 // Almacenamiento temporal de suscripciones (en producción usarías una base de datos)
 let subscriptions = [];
@@ -42,48 +34,26 @@ router.post('/subscribe', (req, res) => {
     }
 });
 
-// Endpoint para enviar notificaciones (útil para testing)
+// Endpoint para enviar notificaciones (deshabilitado - webpush removido)
 router.post('/send', (req, res) => {
     try {
-        const { title, body, icon } = req.body;
+        const { title, body } = req.body;
 
         if (!title || !body) {
             return res.status(400).json({ error: 'Título y cuerpo son requeridos' });
         }
 
-        const payload = JSON.stringify({
-            title,
-            body,
-            icon: icon || '/icons/android-chrome-192x192.png'
-        });
-
-        let successCount = 0;
-        let failCount = 0;
-
-        // Enviar a todas las suscripciones activas
-        const promises = subscriptions.map(subscription =>
-            webpush.sendNotification(subscription, payload)
-                .then(() => {
-                    successCount++;
-                    console.log('[Push] Notificación enviada exitosamente');
-                })
-                .catch(error => {
-                    failCount++;
-                    console.error('[Push] Error enviando notificación:', error.message);
-                    // Remover suscripciones inválidas
-                    subscriptions = subscriptions.filter(sub => sub.endpoint !== subscription.endpoint);
-                })
-        );
-
-        Promise.allSettled(promises).then(() => {
-            res.json({
-                message: `Notificaciones enviadas: ${successCount} exitosas, ${failCount} fallidas`,
-                totalSubscriptions: subscriptions.length
-            });
+        // Notificación push deshabilitada (webpush removido)
+        console.log('[Notificaciones] Endpoint /send ya no envía push notifications (webpush removido)');
+        
+        res.json({
+            message: 'Servicio de push notifications deshabilitado',
+            note: 'Webpush ha sido removido del proyecto',
+            totalSubscriptions: subscriptions.length
         });
 
     } catch (error) {
-        console.error('[Push] Error enviando notificación:', error);
+        console.error('[Notificaciones] Error:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
