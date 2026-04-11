@@ -38,7 +38,7 @@ app.use('/api/miembros', miembroRoutes);
 app.use('/api/clientes', clienteRoutes);
 app.use('/api/creditos', creditoRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
-app.use('/api/notifications', notificacionesRoutes); // Alias, por si alguna petición usa la variante en inglés
+app.use('/api/notifications', notificacionesRoutes); 
 
 // Iniciar el servidor
 const PORT = process.env.PORT || 3000;
