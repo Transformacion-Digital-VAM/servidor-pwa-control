@@ -23,9 +23,14 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: ['*'],
+  origin: [
+    'https://pwa-hcontrol-vam.web.app',
+    'http://localhost:4200',
+    'http://localhost:3000'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
