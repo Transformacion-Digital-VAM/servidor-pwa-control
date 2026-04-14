@@ -33,11 +33,36 @@ const creditoSchema = new mongoose.Schema({
     fechaPrimerPago: { type: Date, required: true },
     pagos: [{
         numeroPago: { type: Number, required: true },
+        // 1. PAGO DEL CRÉDITO (Liquidación / Abono)
         montoPagado: { type: Number, required: true },
-        fechaPago: { type: Date, default: Date.now },
+        efectivoCredito: { type: Number, default: 0 },
+        transferenciaCredito: { type: Number, default: 0 },
+        tarjetaCredito: { type: Number, default: 0 },
+        depositoCredito: { type: Number, default: 0 },
+
+        // 2. PAGO SOLIDARIO
         pagoSolidario: { type: Boolean, default: false },
-        metodoPago: { type: String, required: true },
+        montoSolidario: { type: Number, default: 0 },
+        efectivoSolidario: { type: Number, default: 0 },
+        transferenciaSolidario: { type: Number, default: 0 },
+        tarjetaSolidario: { type: Number, default: 0 },
+        depositoSolidario: { type: Number, default: 0 },
+
+        // 3. PAGO AHORRO
+        montoAhorro: { type: Number, default: 0 },
+        efectivoAhorro: { type: Number, default: 0 },
+        transferenciaAhorro: { type: Number, default: 0 },
+        tarjetaAhorro: { type: Number, default: 0 },
+        depositoAhorro: { type: Number, default: 0 },
+
+        fechaPago: { type: Date, default: Date.now },
+        metodoPago: {
+            type: String,
+            enum: ['EFECTIVO', 'TRANSFERENCIA', 'DEPOSITO', 'TARJETA', 'MIXTO'],
+            required: true
+        },
         totalPagado: { type: Number, required: true },
+        metodoPagoSolidario: { type: String, required: false },
         miembro: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Miembro',
@@ -49,7 +74,12 @@ const creditoSchema = new mongoose.Schema({
             required: function () {
                 return this.pagoSolidario === true;
             }
-        }
+        },
+        recuperacionSolidario: {
+            type: Boolean,
+            default: false
+        },
+        numeroRecibo: { type: Number, required: false }
     }],
     garantia: {
         type: Number,
@@ -60,7 +90,8 @@ const creditoSchema = new mongoose.Schema({
         pagosAhorro: [{
             monto: { type: Number },
             fecha: { type: Date, default: Date.now }
-        }]
+        }],
+        metodoPago: { type: String, required: false }
     },
     tasaInteres: { type: Number, required: true },
     montoSolicitado: { type: Number, required: true },

@@ -194,7 +194,7 @@ exports.actualizarCredito = async (req, res) => {
 
         // --- AUTOMATIZACIÓN DE CÁLCULO PARA REFILL ---
         const esRefill = datosActualizar.tipoCredito === 'R' || creditoOriginal.tipoCredito === 'R';
-        
+
         // Evitamos que los miembros que no actualizaron su crédito pierdan sus saldos y datos,
         // verificando si hubo algún cambio real en los parámetros de su crédito.
         const tipoCambio = datosActualizar.tipoCredito && datosActualizar.tipoCredito !== creditoOriginal.tipoCredito;
@@ -280,7 +280,12 @@ exports.eliminarCredito = async (req, res) => {
 exports.registrarPago = async (req, res) => {
     try {
         const { id } = req.params; // ID del crédito desde el cual se registra el pago 
-        const { montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, metodoPago } = req.body;
+        const {
+            montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, metodoPago,
+            efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
+            montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
+            montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro
+        } = req.body;
 
         // 1. Obtener el crédito 
         const creditoOrigen = await Credito.findById(id);
@@ -288,29 +293,57 @@ exports.registrarPago = async (req, res) => {
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
         }
 
+        const montoCreditoNum = Number(montoPagado) || 0;
+        const montoSolidarioNum = Number(montoSolidario) || 0;
+        const montoAhorroNum = Number(montoAhorro) || 0;
+
+        const sumaTotal = montoCreditoNum + montoSolidarioNum + montoAhorroNum;
+
         // --- MANEJO DE CRÉDITO INDIVIDUAL ---
         if (creditoOrigen.tipoCredito === 'Individual') {
-            if (creditoOrigen.estado === 'Liquidado') {
+            if (creditoOrigen.estado === 'Liquidado' && montoCreditoNum > 0) {
                 return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
             }
-            if (montoPagado <= 0) {
-                return res.status(400).json({ ok: false, msg: 'El monto debe ser mayor a 0' });
+            if (sumaTotal <= 0) {
+                return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
             }
-            if (montoPagado > creditoOrigen.saldoPendiente) {
+            if (montoCreditoNum > creditoOrigen.saldoPendiente) {
                 return res.status(400).json({ ok: false, msg: `El monto excede el saldo pendiente (${creditoOrigen.saldoPendiente})` });
             }
 
             const numeroPago = creditoOrigen.pagos.length + 1;
             const nuevoPago = {
                 numeroPago,
-                montoPagado,
+                montoPagado: montoCreditoNum,
+                efectivoCredito: efectivoCredito || 0,
+                transferenciaCredito: transferenciaCredito || 0,
+                tarjetaCredito: tarjetaCredito || 0,
+                depositoCredito: depositoCredito || 0,
+
+                pagoSolidario: !!pagoSolidario,
+                montoSolidario: montoSolidarioNum,
+                efectivoSolidario: efectivoSolidario || 0,
+                transferenciaSolidario: transferenciaSolidario || 0,
+                tarjetaSolidario: tarjetaSolidario || 0,
+                depositoSolidario: depositoSolidario || 0,
+
+                montoAhorro: montoAhorroNum,
+                efectivoAhorro: efectivoAhorro || 0,
+                transferenciaAhorro: transferenciaAhorro || 0,
+                tarjetaAhorro: tarjetaAhorro || 0,
+                depositoAhorro: depositoAhorro || 0,
+
                 fechaPago: fechaPago || new Date(),
-                pagoSolidario: false,
-                metodoPago: metodoPago || 'Efectivo'
+                metodoPago: metodoPago || 'EFECTIVO',
+                totalPagado: (creditoOrigen.pagos.reduce((acc, p) => acc + (p.montoPagado || 0), 0)) + montoCreditoNum,
             };
 
             creditoOrigen.pagos.push(nuevoPago);
-            creditoOrigen.saldoPendiente -= montoPagado;
+            creditoOrigen.saldoPendiente -= montoCreditoNum;
+
+            if (montoAhorroNum > 0) {
+                creditoOrigen.ahorro.montoTotal = (creditoOrigen.ahorro.montoTotal || 0) + montoAhorroNum;
+            }
 
             if (creditoOrigen.saldoPendiente <= 0) {
                 creditoOrigen.saldoPendiente = 0;
@@ -329,7 +362,7 @@ exports.registrarPago = async (req, res) => {
 
         let creditoDestino;
 
-        if (pagoSolidario) {
+        if (pagoSolidario && montoSolidarioNum > 0) {
             // Caso Solidario: El dinero se abona al crédito del beneficiario (enviado como 'miembro' en el body)
             if (!beneficiarioId) {
                 return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro)' });
@@ -347,15 +380,16 @@ exports.registrarPago = async (req, res) => {
         }
 
         // --- VALIDACIONES DE ESTADO Y MONTOS ---
-        if (creditoDestino.estado === 'Liquidado') {
+        if (creditoDestino.estado === 'Liquidado' && (montoCreditoNum > 0 || montoSolidarioNum > 0)) {
             return res.status(400).json({ ok: false, msg: 'El crédito de destino ya está liquidado' });
         }
 
-        if (montoPagado <= 0) {
-            return res.status(400).json({ ok: false, msg: 'El monto debe ser mayor a 0' });
+        if (sumaTotal <= 0) {
+            return res.status(400).json({ ok: false, msg: 'El pago total debe ser mayor a 0' });
         }
 
-        if (montoPagado > creditoDestino.saldoPendiente) {
+        const abonoAlCredito = pagoSolidario ? montoSolidarioNum : montoCreditoNum;
+        if (abonoAlCredito > creditoDestino.saldoPendiente) {
             return res.status(400).json({ ok: false, msg: `El monto excede el saldo pendiente (${creditoDestino.saldoPendiente})` });
         }
 
@@ -368,7 +402,6 @@ exports.registrarPago = async (req, res) => {
             const fechaAhora = fechaPago ? new Date(fechaPago) : new Date();
             const fechaUltimo = new Date(ultimoPago.fechaPago);
 
-            // Si es el mismo día calendario, mantenemos el mismo número de pago
             if (fechaAhora.toDateString() === fechaUltimo.toDateString()) {
                 numeroPago = ultimoPago.numeroPago;
             } else {
@@ -378,15 +411,32 @@ exports.registrarPago = async (req, res) => {
 
         // Calcular el historial del total pagado para este nuevo registro
         const pagosAnteriores = creditoDestino.pagos || [];
-        const totalHistorico = pagosAnteriores.reduce((acc, p) => acc + p.montoPagado, 0);
-        const nuevoTotalPagado = totalHistorico + montoPagado;
+        const totalHistorico = pagosAnteriores.reduce((acc, p) => acc + (p.montoPagado || 0), 0);
+        const nuevoTotalPagado = totalHistorico + abonoAlCredito;
 
         const nuevoPago = {
             numeroPago,
-            montoPagado,
+            montoPagado: montoCreditoNum,
+            efectivoCredito: efectivoCredito || 0,
+            transferenciaCredito: transferenciaCredito || 0,
+            tarjetaCredito: tarjetaCredito || 0,
+            depositoCredito: depositoCredito || 0,
+
+            pagoSolidario: !!pagoSolidario,
+            montoSolidario: montoSolidarioNum,
+            efectivoSolidario: efectivoSolidario || 0,
+            transferenciaSolidario: transferenciaSolidario || 0,
+            tarjetaSolidario: tarjetaSolidario || 0,
+            depositoSolidario: depositoSolidario || 0,
+
+            montoAhorro: montoAhorroNum,
+            efectivoAhorro: efectivoAhorro || 0,
+            transferenciaAhorro: transferenciaAhorro || 0,
+            tarjetaAhorro: tarjetaAhorro || 0,
+            depositoAhorro: depositoAhorro || 0,
+
             fechaPago: fechaPago || new Date(),
-            pagoSolidario: pagoSolidario || false,
-            metodoPago: metodoPago || 'Efectivo',
+            metodoPago: metodoPago || 'EFECTIVO',
             totalPagado: nuevoTotalPagado,
             // 'miembro' en el subdocumento Pago siempre es el beneficiario
             miembro: creditoDestino.miembro,
@@ -398,7 +448,11 @@ exports.registrarPago = async (req, res) => {
         creditoDestino.pagos.push(nuevoPago);
 
         // Restar saldo al crédito de destino
-        creditoDestino.saldoPendiente -= montoPagado;
+        creditoDestino.saldoPendiente -= abonoAlCredito;
+
+        if (montoAhorroNum > 0) {
+            creditoDestino.ahorro.montoTotal = (creditoDestino.ahorro.montoTotal || 0) + montoAhorroNum;
+        }
 
         // Verificar si se liquidó el crédito de destino
         if (creditoDestino.saldoPendiente <= 0) {
@@ -523,7 +577,7 @@ function calcularSemanaActual(fechaPrimerPago, frecuenciaPago, fechaReferencia =
 exports.registrarAhorro = async (req, res) => {
     try {
         const { id } = req.params;
-        const { monto, fecha } = req.body;
+        const { monto, fecha, efectivo, transferencia, deposito, tarjeta } = req.body;
 
         const credito = await Credito.findById(id);
 
@@ -544,6 +598,10 @@ exports.registrarAhorro = async (req, res) => {
         // Agregar pago a la lista de ahorro
         credito.ahorro.pagosAhorro.push({
             monto,
+            efectivo: efectivo || 0,
+            transferencia: transferencia || 0,
+            tarjeta: tarjeta || 0,
+            deposito: deposito || 0,
             fecha: fecha || new Date()
         });
 
