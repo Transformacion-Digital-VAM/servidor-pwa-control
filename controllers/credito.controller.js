@@ -112,25 +112,29 @@ exports.obtenerCreditos = async (req, res) => {
         const creditos = await Credito.find()
             .populate('miembro');
 
-        res.json({
-            ok: true,
-            creditos
+        const hoy = new Date();
+        const operacionesBulk = [];
+        let modificados = false;
+
+        creditos.forEach(credito => {
+            if (credito.estado === 'Activo' && credito.fechaPrimerPago) {
+                const semanaCalculada = calcularSemanaActual(credito.fechaPrimerPago, credito.frecuenciaPago || 'Semanal', hoy);
+                if (credito.semanaActual !== semanaCalculada) {
+                    credito.semanaActual = semanaCalculada;
+                    operacionesBulk.push({
+                        updateOne: {
+                            filter: { _id: credito._id },
+                            update: { semanaActual: semanaCalculada }
+                        }
+                    });
+                    modificados = true;
+                }
+            }
         });
 
-    } catch (error) {
-        res.status(500).json({
-            ok: false,
-            msg: 'Error al obtener créditos'
-        });
-    }
-};
-
-
-// READ ALL
-exports.obtenerCreditos = async (req, res) => {
-    try {
-        const creditos = await Credito.find()
-            .populate('miembro');
+        if (operacionesBulk.length > 0) {
+            await Credito.bulkWrite(operacionesBulk);
+        }
 
         res.json({
             ok: true,
@@ -158,6 +162,15 @@ exports.obtenerCreditoPorId = async (req, res) => {
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
+        }
+
+        if (credito.estado === 'Activo' && credito.fechaPrimerPago) {
+            const hoy = new Date();
+            const semanaCalculada = calcularSemanaActual(credito.fechaPrimerPago, credito.frecuenciaPago || 'Semanal', hoy);
+            if (credito.semanaActual !== semanaCalculada) {
+                credito.semanaActual = semanaCalculada;
+                await credito.save();
+            }
         }
 
         res.json({

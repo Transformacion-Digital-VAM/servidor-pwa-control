@@ -188,8 +188,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             let semanaInicioReal = 1;
             if (esRefill) {
-                // Toma la semanaActual configurada en el crédito (o 9 por defecto)
-                semanaInicioReal = parseInt(creditosSubGrupo[0].semanaActual) || 9;
+                // Como semanaActual ahora se actualiza dinámicamente con el paso del tiempo,
+                // ya no podemos usarla directamente para fijar la cabecera de la hoja (que siempre debe ser 9 a 16).
+                // Buscamos si hay algún pago para saber en qué semana inició originalmente, o por defecto 9.
+                let inicioRefill = 9;
+                if (creditosSubGrupo[0] && creditosSubGrupo[0].pagos && creditosSubGrupo[0].pagos.length > 0) {
+                    inicioRefill = creditosSubGrupo[0].pagos[0].numeroPago || 9;
+                }
+                semanaInicioReal = inicioRefill;
 
                 // Un Refill siempre durará 8 semanas (ej. 9-16, 17-24)
                 maxSemanas = 8;
@@ -610,7 +616,11 @@ exports.generarHojaControlIndividual = async (req, res) => {
             let semanaInicioReal = 1;
             let semanasRender = semanasTotales;
             if (creditoActual.tipoCredito === 'R') {
-                semanaInicioReal = parseInt(creditoActual.semanaActual) || 9;
+                let inicioRefill = 9;
+                if (creditoActual.pagos && creditoActual.pagos.length > 0) {
+                    inicioRefill = creditoActual.pagos[0].numeroPago || 9;
+                }
+                semanaInicioReal = inicioRefill;
                 semanasRender = 8; // Un Refill siempre genera 8 semanas de hoja de control
             }
 
