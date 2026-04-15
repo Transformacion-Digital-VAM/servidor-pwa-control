@@ -156,12 +156,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
         };
 
 
-        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R');
+        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R' && c.tipoCredito !== 'Mágico');
         const creditosRefill = creditos.filter(c => c.tipoCredito === 'R');
+        const creditosMagico = creditos.filter(c => c.tipoCredito === 'Mágico');
 
         let gruposCreditos = [];
         if (creditosNormales.length > 0) gruposCreditos.push(creditosNormales);
         if (creditosRefill.length > 0) gruposCreditos.push(creditosRefill);
+        if (creditosMagico.length > 0) gruposCreditos.push(creditosMagico);
 
         const templatePath = path.join(__dirname, '../templates/hojaControl.html');
         let htmlCompletoOrigin = fs.readFileSync(templatePath, 'utf8');
@@ -183,12 +185,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
             }
 
             const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
-            
+
             let semanaInicioReal = 1;
             if (esRefill) {
                 // Toma la semanaActual configurada en el crédito (o 9 por defecto)
                 semanaInicioReal = parseInt(creditosSubGrupo[0].semanaActual) || 9;
-                
+
                 // Un Refill siempre durará 8 semanas (ej. 9-16, 17-24)
                 maxSemanas = 8;
             }
