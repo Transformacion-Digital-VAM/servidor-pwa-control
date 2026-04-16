@@ -65,7 +65,7 @@ exports.crearCredito = async (req, res) => {
             saldoTotal: saldoTotalCalc,
             // Si es nuevo o no tiene saldo, lo inicializamos. Si ya existe, no solemos resetear saldoPendiente si ya hay pagos.
             // Para simplificar el "re-save" del admin:
-            saldoPendiente: saldoTotalCalc, 
+            saldoPendiente: saldoTotalCalc,
             garantia: garantiaCalculada,
             tasaInteres,
             montoSolicitado,

@@ -156,9 +156,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
         };
 
 
-        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R' && c.tipoCredito !== 'Mágico');
+        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R' && c.tipoCredito !== 'MAGICO');
         const creditosRefill = creditos.filter(c => c.tipoCredito === 'R');
-        const creditosMagico = creditos.filter(c => c.tipoCredito === 'Mágico');
+        const creditosMagico = creditos.filter(c => c.tipoCredito === 'MAGICO');
 
         let gruposCreditos = [];
         if (creditosNormales.length > 0) gruposCreditos.push(creditosNormales);
