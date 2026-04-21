@@ -47,7 +47,7 @@ exports.obtenerAsesores = async (req, res) => {
             username: 1,
             coordinacion: 1,
             lastLocation: 1,
-        });
+        }).populate('coordinacion', 'nombre municipio');
 
         res.json(asesores);
     } catch (error) {

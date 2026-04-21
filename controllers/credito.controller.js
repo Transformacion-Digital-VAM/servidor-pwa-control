@@ -298,7 +298,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario 
+            recuperacionSolidario, numeroRecibo
         } = req.body;
 
         // 1. Obtener el crédito 
@@ -355,6 +355,7 @@ exports.registrarPago = async (req, res) => {
 
                 fechaPago: fechaPago || new Date(),
                 metodoPago: metodoPago || 'EFECTIVO',
+                numeroRecibo: numeroRecibo || null,
                 totalPagado: (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0) + montoCreditoNum,
             };
 
@@ -461,6 +462,7 @@ exports.registrarPago = async (req, res) => {
 
             fechaPago: fechaPago || new Date(),
             metodoPago: metodoPago || 'EFECTIVO',
+            numeroRecibo: numeroRecibo || null,
             totalPagado: nuevoTotalPagado,
             miembro: creditoDestino.miembro, // Beneficiario
             
