@@ -188,14 +188,19 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             let semanaInicioReal = 1;
             if (esRefill) {
-                // Como semanaActual ahora se actualiza dinámicamente con el paso del tiempo,
-                // ya no podemos usarla directamente para fijar la cabecera de la hoja (que siempre debe ser 9 a 16).
-                // Buscamos si hay algún pago para saber en qué semana inició originalmente, o por defecto 9.
-                let inicioRefill = 9;
-                if (creditosSubGrupo[0] && creditosSubGrupo[0].pagos && creditosSubGrupo[0].pagos.length > 0) {
-                    inicioRefill = creditosSubGrupo[0].pagos[0].numeroPago || 9;
+                // Prioridad 1: Query param enviado desde el front (Admin o PWA)
+                if (req.query.semanaInicioRefil) {
+                    semanaInicioReal = parseInt(req.query.semanaInicioRefil);
+                } else {
+                    // Fallback: Buscar si hay algún pago para saber en qué semana inició originalmente
+                    let inicioRefill = 9;
+                    if (creditosSubGrupo[0] && creditosSubGrupo[0].pagos && creditosSubGrupo[0].pagos.length > 0) {
+                        // Si hay pagos anteriores, buscar el primero de ESTE ciclo? 
+                        // En realidad, para Refill solemos querer la parte alta (9-16)
+                        inicioRefill = creditosSubGrupo[0].pagos[0].numeroPago || 9;
+                    }
+                    semanaInicioReal = inicioRefill;
                 }
-                semanaInicioReal = inicioRefill;
 
                 // Un Refill siempre durará 8 semanas (ej. 9-16, 17-24)
                 maxSemanas = 8;
@@ -387,16 +392,31 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     let label = semanaInicioReal + w - 1;
                     let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
                     let valorCelda = '';
-                    if (llena && credito.ahorro && credito.ahorro.pagosAhorro) {
-                        // El índice en pagosAhorro es w-1 si corresponde al tiempo real transcurrido
-                        // Si la matriz de ahorro guarda desde 0. Así que lo dejamos mapeado al loop actual w-1
-                        const ahorro = credito.ahorro.pagosAhorro[w - 1];
-                        if (ahorro && ahorro.monto > 0) {
-                            valorCelda = `${formatoMoneda(ahorro.monto)}`;
+                    if (llena) {
+                        let montoSemana = 0;
+                        // 1. Prioridad: Buscar en historial de pagos (ahorro capturado junto con el pago semanal)
+                        if (credito.pagos && credito.pagos.length > 0) {
+                            const pSemana = credito.pagos.find(p => p.numeroPago == label);
+                            if (pSemana && pSemana.montoAhorro > 0) {
+                                montoSemana = pSemana.montoAhorro;
+                            }
+                        }
+                        
+                        // 2. Fallback: Buscar en pagosAhorro independientes
+                        if (montoSemana === 0 && credito.ahorro && credito.ahorro.pagosAhorro && credito.ahorro.pagosAhorro.length > 0) {
+                            const ahorro = credito.ahorro.pagosAhorro[w - 1];
+                            if (ahorro && ahorro.monto > 0) {
+                                montoSemana = ahorro.monto;
+                            }
+                        }
+
+                        if (montoSemana > 0) {
+                            valorCelda = `${formatoMoneda(montoSemana)}`;
                         }
                     }
                     tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
                 }
+                
                 let totalAhorro = garantiaInicial;
                 if (llena && credito.ahorro) {
                     totalAhorro += (credito.ahorro.montoTotal || 0);
