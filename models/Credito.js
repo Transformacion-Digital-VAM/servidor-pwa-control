@@ -30,6 +30,10 @@ const creditoSchema = new mongoose.Schema({
         enum: ['Activo', 'Liquidado'],
         default: 'Activo'
     },
+    saldoSolidario: {
+        type: Number,
+        default: 0
+    },
     fechaPrimerPago: { type: Date, required: true },
     pagos: [{
         numeroPago: { type: Number, required: true },
@@ -79,7 +83,18 @@ const creditoSchema = new mongoose.Schema({
             type: Boolean,
             default: false
         },
-        numeroRecibo: { type: Number, required: false }
+        numeroRecibo: { type: Number, required: false },
+        detallesSolidario: [{
+            miembro: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Miembro'
+            },
+            monto: { type: Number }
+        }],
+        ubicacion: {
+            latitud: { type: Number, required: false },
+            longitud: { type: Number, required: false }
+        }
     }],
     garantia: {
         type: Number,
@@ -89,7 +104,11 @@ const creditoSchema = new mongoose.Schema({
         montoTotal: { type: Number, required: false },
         pagosAhorro: [{
             monto: { type: Number },
-            fecha: { type: Date, default: Date.now }
+            fecha: { type: Date, default: Date.now },
+            ubicacion: {
+                latitud: { type: Number, required: false },
+                longitud: { type: Number, required: false }
+            }
         }],
         metodoPago: { type: String, required: false }
     },
