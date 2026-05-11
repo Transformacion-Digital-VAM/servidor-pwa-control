@@ -101,10 +101,10 @@ exports.updateLocation = async (req, res) => {
 
 exports.getAllLocations = async (req, res) => {
     try {
-        // Verificar si el usuario que hace la petición es 'master'
-        if (req.user.role !== 'master') {
+        // Verificar si el usuario que hace la petición es 'master' o 'superadmin'
+        if (req.user.role !== 'master' && req.user.role !== 'superadmin') {
             return res.status(403).json({ 
-                message: 'Acceso denegado. Solo el rol master puede obtener ubicaciones de otros usuarios.' 
+                message: 'Acceso denegado. Solo el rol master o superadmin puede obtener ubicaciones de otros usuarios.' 
             });
         }
 

@@ -2,7 +2,7 @@ const Cliente = require('../models/Cliente');
 
 exports.createCliente = async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "No tienes permisos para crear clientes" });
         }
         const cliente = new Cliente(req.body);
@@ -30,7 +30,7 @@ exports.getCliente = async (req, res) => {
 
 exports.getClientePorId = async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "No tienes permisos para obtener clientes" });
         }
         const cliente = await Cliente.findById(req.params.id);
@@ -42,7 +42,7 @@ exports.getClientePorId = async (req, res) => {
 
 exports.updateCliente = async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "No tienes permisos para actualizar clientes" });
         }
         const cliente = await Cliente.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -54,7 +54,7 @@ exports.updateCliente = async (req, res) => {
 
 exports.deleteCliente = async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "No tienes permisos para eliminar clientes" });
         }
         const cliente = await Cliente.findByIdAndDelete(req.params.id);

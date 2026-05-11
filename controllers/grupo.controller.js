@@ -2,8 +2,8 @@ const Grupo = require('../models/Grupo');
 
 exports.createGrupo = async (req, res) => {
     try {
-        // Solo el Admin puede crear grupos
-        if (req.user.role !== 'admin') {
+        // Solo el Admin, master o superadmin pueden crear grupos
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "No tienes permisos para crear grupos" });
         }
 
@@ -94,8 +94,8 @@ exports.getGruposPorAsesor = async (req, res) => {
 
 exports.updateGrupo = async (req, res) => {
     try {
-        // Solo el Admin puede editar grupos
-        if (req.user.role !== 'admin') {
+        // Solo el Admin, master o superadmin pueden editar grupos
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "Solo el administrador puede editar grupos" });
         }
 
@@ -108,8 +108,8 @@ exports.updateGrupo = async (req, res) => {
 
 exports.deleteGrupo = async (req, res) => {
     try {
-        // Solo el Admin puede eliminar grupos
-        if (req.user.role !== 'admin') {
+        // Solo el Admin, master o superadmin pueden eliminar grupos
+        if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             return res.status(403).json({ message: "Solo el administrador puede eliminar grupos" });
         }
 

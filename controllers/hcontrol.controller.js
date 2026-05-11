@@ -13,6 +13,7 @@ const getBrowser = async () => {
 
         const options = {
             headless: true,
+            pipe: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -187,7 +188,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
             const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
 
             let semanaInicioReal = 1;
-            if (esRefill) {
+            if (req.query.semanaInicio) {
+                semanaInicioReal = parseInt(req.query.semanaInicio);
+                maxSemanas = 8;
+            } else if (esRefill) {
                 // Prioridad 1: Query param enviado desde el front (Admin o PWA)
                 if (req.query.semanaInicioRefil) {
                     semanaInicioReal = parseInt(req.query.semanaInicioRefil);
