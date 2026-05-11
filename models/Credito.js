@@ -30,6 +30,10 @@ const creditoSchema = new mongoose.Schema({
         enum: ['Activo', 'Liquidado'],
         default: 'Activo'
     },
+    saldoSolidario: {
+        type: Number,
+        default: 0
+    },
     fechaPrimerPago: { type: Date, required: true },
     pagos: [{
         numeroPago: { type: Number, required: true },
@@ -80,6 +84,13 @@ const creditoSchema = new mongoose.Schema({
             default: false
         },
         numeroRecibo: { type: Number, required: false },
+        detallesSolidario: [{
+            miembro: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Miembro'
+            },
+            monto: { type: Number }
+        }],
         ubicacion: {
             latitud: { type: Number, required: false },
             longitud: { type: Number, required: false }
