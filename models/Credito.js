@@ -79,7 +79,11 @@ const creditoSchema = new mongoose.Schema({
             type: Boolean,
             default: false
         },
-        numeroRecibo: { type: Number, required: false }
+        numeroRecibo: { type: Number, required: false },
+        ubicacion: {
+            latitud: { type: Number, required: false },
+            longitud: { type: Number, required: false }
+        }
     }],
     garantia: {
         type: Number,
@@ -89,7 +93,11 @@ const creditoSchema = new mongoose.Schema({
         montoTotal: { type: Number, required: false },
         pagosAhorro: [{
             monto: { type: Number },
-            fecha: { type: Date, default: Date.now }
+            fecha: { type: Date, default: Date.now },
+            ubicacion: {
+                latitud: { type: Number, required: false },
+                longitud: { type: Number, required: false }
+            }
         }],
         metodoPago: { type: String, required: false }
     },

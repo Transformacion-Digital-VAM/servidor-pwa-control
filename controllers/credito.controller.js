@@ -297,7 +297,8 @@ exports.registrarPago = async (req, res) => {
             montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, metodoPago,
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
-            montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro
+            montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
+            ubicacion
         } = req.body;
 
         // 1. Obtener el crédito 
@@ -349,6 +350,7 @@ exports.registrarPago = async (req, res) => {
                 fechaPago: fechaPago || new Date(),
                 metodoPago: metodoPago || 'EFECTIVO',
                 totalPagado: (creditoOrigen.pagos.reduce((acc, p) => acc + (p.montoPagado || 0), 0)) + montoCreditoNum,
+                ubicacion,
             };
 
             creditoOrigen.pagos.push(nuevoPago);
@@ -451,6 +453,7 @@ exports.registrarPago = async (req, res) => {
             fechaPago: fechaPago || new Date(),
             metodoPago: metodoPago || 'EFECTIVO',
             totalPagado: nuevoTotalPagado,
+            ubicacion,
             // 'miembro' en el subdocumento Pago siempre es el beneficiario
             miembro: creditoDestino.miembro,
             // 'quienPrestoSolidario' 
@@ -590,7 +593,7 @@ function calcularSemanaActual(fechaPrimerPago, frecuenciaPago, fechaReferencia =
 exports.registrarAhorro = async (req, res) => {
     try {
         const { id } = req.params;
-        const { monto, fecha, efectivo, transferencia, deposito, tarjeta } = req.body;
+        const { monto, fecha, efectivo, transferencia, deposito, tarjeta, ubicacion } = req.body;
 
         const credito = await Credito.findById(id);
 
@@ -615,7 +618,8 @@ exports.registrarAhorro = async (req, res) => {
             transferencia: transferencia || 0,
             tarjeta: tarjeta || 0,
             deposito: deposito || 0,
-            fecha: fecha || new Date()
+            fecha: fecha || new Date(),
+            ubicacion
         });
 
         // Actualizar el monto total sumando todos los pagos
