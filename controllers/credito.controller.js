@@ -431,7 +431,8 @@ exports.registrarPago = async (req, res) => {
                         metodoPago: metodoPago || 'EFECTIVO',
                         totalPagado: (creditoDestino.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0) + bMonto,
                         miembro: bId,
-                        quienPrestoSolidario: creditoOrigen.miembro
+                        quienPrestoSolidario: creditoOrigen.miembro,
+                        numeroRecibo: numeroRecibo || null
                     };
 
                     creditoDestino.pagos.push(nuevoPagoDestino);
@@ -515,9 +516,9 @@ exports.registrarPago = async (req, res) => {
         }
 
         // --- VALIDACIONES DE ESTADO Y MONTOS ---
-        if (creditoDestino.estado === 'Liquidado' && (montoCreditoNum > 0 || montoSolidarioNum > 0)) {
-            return res.status(400).json({ ok: false, msg: 'El crédito de destino ya está liquidado' });
-        }
+        // Se removieron las validaciones 400 de liquidado y excedente para evitar race conditions
+        // en pagos concurrentes (múltiples solidarios + pago normal). 
+        // El saldoPendiente se topará en 0 al final de la función si llega a bajar de 0.
 
         if (sumaTotal <= 0) {
             return res.status(400).json({ ok: false, msg: 'El pago total debe ser mayor a 0' });
@@ -525,10 +526,6 @@ exports.registrarPago = async (req, res) => {
 
         // El abono al CRÉDITO se toma según si es solidario o no
         const abonoAlCredito = (pagoSolidario && !recuperacionSolidario) ? montoSolidarioNum : montoCreditoNum;
-
-        if (abonoAlCredito > creditoDestino.saldoPendiente) {
-            return res.status(400).json({ ok: false, msg: `El monto excede el saldo pendiente (${creditoDestino.saldoPendiente})` });
-        }
 
         // --- CREACIÓN DEL REGISTRO DE PAGO ---
         let numeroPago;
@@ -584,7 +581,8 @@ exports.registrarPago = async (req, res) => {
             quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? (creditoOrigen.miembro || null) : undefined,
             
             // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array 'beneficiarios')
-            detallesSolidario: (pagoSolidario && !recuperacionSolidario && req.body.beneficiarios) ? req.body.beneficiarios : undefined
+            // Si es recuperación, guardamos a quién le devolvió
+            detallesSolidario: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && req.body.beneficiarios ? req.body.beneficiarios : undefined
         };
 
         // Agregar pago al crédito de destino
@@ -595,15 +593,13 @@ exports.registrarPago = async (req, res) => {
         creditoDestino.saldoPendiente -= abonoAlCredito;
 
         // --- GESTIÓN DE SALDO SOLIDARIO ---
-        if (pagoSolidario) {
-            if (recuperacionSolidario) {
-                // Si es recuperación, restamos de su deuda solidaria el monto que está pagando
-                // (Usamos abonoAlCredito que en recuperación es montoCreditoNum)
-                creditoDestino.saldoSolidario = Math.max(0, (creditoDestino.saldoSolidario || 0) - abonoAlCredito);
-            } else {
-                // Si es un apoyo que recibe, aumenta su deuda solidaria
-                creditoDestino.saldoSolidario = (creditoDestino.saldoSolidario || 0) + montoSolidarioNum;
-            }
+        if (recuperacionSolidario) {
+            // Si es recuperación, restamos de su deuda solidaria el monto que está pagando
+            // (Usamos abonoAlCredito que en recuperación es montoCreditoNum)
+            creditoDestino.saldoSolidario = Math.max(0, (creditoDestino.saldoSolidario || 0) - abonoAlCredito);
+        } else if (pagoSolidario) {
+            // Si es un apoyo que recibe, aumenta su deuda solidaria
+            creditoDestino.saldoSolidario = (creditoDestino.saldoSolidario || 0) + montoSolidarioNum;
         }
 
         if (montoAhorroNum > 0) {
