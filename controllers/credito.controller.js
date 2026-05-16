@@ -300,7 +300,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo
+            recuperacionSolidario, numeroRecibo, ubicacion
         } = req.body;
 
         // 1. Obtener el crédito 
@@ -353,13 +353,14 @@ exports.registrarPago = async (req, res) => {
                 tarjetaAhorro: tarjetaAhorro || 0,
                 depositoAhorro: depositoAhorro || 0,
 
-                recuperacionSolidario: !!recuperacionSolidario, // Guardamos la bandera
+                recuperacionSolidario: !!recuperacionSolidario,
 
                 fechaPago: fechaPago || new Date(),
                 metodoPago: metodoPago || 'EFECTIVO',
 
                 numeroRecibo: numeroRecibo || null,
                 totalPagado: (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0) + montoCreditoNum,
+                ...(ubicacion ? { ubicacion } : {})
             };
 
             creditoOrigen.pagos.push(nuevoPago);
@@ -432,7 +433,8 @@ exports.registrarPago = async (req, res) => {
                         totalPagado: (creditoDestino.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0) + bMonto,
                         miembro: bId,
                         quienPrestoSolidario: creditoOrigen.miembro,
-                        numeroRecibo: numeroRecibo || null
+                        numeroRecibo: numeroRecibo || null,
+                        ...(ubicacion ? { ubicacion } : {})
                     };
 
                     creditoDestino.pagos.push(nuevoPagoDestino);
@@ -458,7 +460,7 @@ exports.registrarPago = async (req, res) => {
                 tarjetaCredito: tarjetaCredito || 0,
                 depositoCredito: depositoCredito || 0,
 
-                pagoSolidario: false, // El que presta no está recibiendo apoyo solidario
+                pagoSolidario: false,
                 montoSolidario: totalSolidarioOtorgado,
                 efectivoSolidario: efectivoSolidario || 0,
                 transferenciaSolidario: transferenciaSolidario || 0,
@@ -475,7 +477,8 @@ exports.registrarPago = async (req, res) => {
                 fechaPago: fechaPago || new Date(),
                 metodoPago: metodoPago || 'EFECTIVO',
                 totalPagado: (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0) + montoCreditoNum,
-                numeroRecibo: numeroRecibo || null
+                numeroRecibo: numeroRecibo || null,
+                ...(ubicacion ? { ubicacion } : {})
             };
 
             creditoOrigen.pagos.push(pagoMaster);
@@ -569,20 +572,22 @@ exports.registrarPago = async (req, res) => {
             tarjetaAhorro: tarjetaAhorro || 0,
             depositoAhorro: depositoAhorro || 0,
 
-            recuperacionSolidario: !!recuperacionSolidario, // Identificar si es recuperación
+            recuperacionSolidario: !!recuperacionSolidario,
 
             fechaPago: fechaPago || new Date(),
             metodoPago: metodoPago || 'EFECTIVO',
             numeroRecibo: numeroRecibo || null,
             totalPagado: nuevoTotalPagado,
-            miembro: creditoDestino.miembro, // Beneficiario
+            miembro: creditoDestino.miembro,
 
             // Solo asignar si es un apoyo a un TERCERO, no si es recuperación a uno mismo
             quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? (creditoOrigen.miembro || null) : undefined,
             
             // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array 'beneficiarios')
             // Si es recuperación, guardamos a quién le devolvió
-            detallesSolidario: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && req.body.beneficiarios ? req.body.beneficiarios : undefined
+            detallesSolidario: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && req.body.beneficiarios ? req.body.beneficiarios : undefined,
+
+            ...(ubicacion ? { ubicacion } : {})
         };
 
         // Agregar pago al crédito de destino
@@ -630,6 +635,75 @@ exports.registrarPago = async (req, res) => {
     }
 };
 
+
+// PAGOS CON UBICACIÓN (para el mapa del admin)
+exports.getPagosConUbicacion = async (req, res) => {
+    try {
+        const creditos = await Credito.find({
+            'pagos.ubicacion.latitud': { $exists: true }
+        })
+        .populate({
+            path: 'miembro',
+            select: 'nombre apellidos rol',
+            populate: {
+                path: 'grupo',
+                select: 'nombre clave asesor',
+                populate: { path: 'asesor', select: 'username' }
+            }
+        })
+        .populate({ path: 'cliente', select: 'nombre' })
+        .lean();
+
+        const puntos = [];
+
+        for (const credito of creditos) {
+            for (const pago of (credito.pagos || [])) {
+                if (!pago.ubicacion?.latitud || !pago.ubicacion?.longitud) continue;
+
+                // Nombre del beneficiario
+                let nombrePersona = 'Desconocido';
+                let grupo = null;
+                let asesor = null;
+
+                if (credito.miembro) {
+                    const m = credito.miembro;
+                    nombrePersona = `${m.nombre || ''} ${m.apellidos || ''}`.trim();
+                    if (m.grupo) {
+                        grupo = m.grupo.nombre || m.grupo.clave || null;
+                        asesor = m.grupo.asesor?.username || null;
+                    }
+                } else if (credito.cliente) {
+                    nombrePersona = credito.cliente.nombre || 'Cliente';
+                }
+
+                puntos.push({
+                    creditoId: credito._id,
+                    pagoId: pago._id,
+                    numeroPago: pago.numeroPago,
+                    fechaPago: pago.fechaPago,
+                    montoPagado: pago.montoPagado || 0,
+                    montoSolidario: pago.montoSolidario || 0,
+                    totalPagado: pago.totalPagado || 0,
+                    metodoPago: pago.metodoPago,
+                    numeroRecibo: pago.numeroRecibo,
+                    tipoCredito: credito.tipoCredito,
+                    persona: nombrePersona,
+                    grupo,
+                    asesor,
+                    ubicacion: pago.ubicacion
+                });
+            }
+        }
+
+        // Ordenar por fecha descendente
+        puntos.sort((a, b) => new Date(b.fechaPago) - new Date(a.fechaPago));
+
+        res.json({ ok: true, total: puntos.length, puntos });
+    } catch (error) {
+        console.error('Error en getPagosConUbicacion:', error);
+        res.status(500).json({ ok: false, msg: 'Error al obtener pagos con ubicación', error: error.message });
+    }
+};
 
 // REGISTRAR ABONO A GARANTÍA
 exports.registrarAbonoGarantia = async (req, res) => {
