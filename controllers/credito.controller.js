@@ -434,10 +434,13 @@ exports.registrarPago = async (req, res) => {
                     const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
                     const existeDuplicado = (creditoDestino.pagos || []).some(p => {
                         const fechaPagoExistente = new Date(p.fechaPago);
+                        // Solo considerar duplicado si el mismo originador ya registró el mismo solidario ese día
+                        const mismoOrigen = p.quienPrestoSolidario && creditoOrigen.miembro && p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString();
                         return (
                             fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
                             p.montoSolidario === bMonto &&
-                            p.metodoPago === (metodoPago || 'EFECTIVO')
+                            p.metodoPago === (metodoPago || 'EFECTIVO') &&
+                            mismoOrigen
                         );
                     });
                     if (existeDuplicado) {
@@ -574,12 +577,16 @@ exports.registrarPago = async (req, res) => {
         const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
         const existeDuplicado = (creditoDestino.pagos || []).some(p => {
             const fechaPagoExistente = new Date(p.fechaPago);
+            const mismoOrigenSolidario = pagoSolidario && !recuperacionSolidario && p.quienPrestoSolidario && creditoOrigen.miembro
+                ? p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString()
+                : true;
             return (
                 fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
                 p.montoPagado === montoCreditoNum &&
                 p.montoSolidario === montoSolidarioNum &&
                 p.metodoPago === (metodoPago || 'EFECTIVO') &&
-                p.montoAhorro === montoAhorroNum
+                p.montoAhorro === montoAhorroNum &&
+                mismoOrigenSolidario
             );
         });
         if (existeDuplicado) {
