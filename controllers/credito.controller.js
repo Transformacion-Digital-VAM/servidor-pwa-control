@@ -310,14 +310,22 @@ exports.registrarPago = async (req, res) => {
         }
 
         // --- NORMALIZACIÓN DE MONTOS ---
-        // Si es pago solidario pero el monto viene en montoPagado (habitual por el frontend), lo movemos
+        // Si es pago solidario, aseguramos que el monto solidario no se contabilice como pago normal
         let montoCreditoNum = Number(montoPagado) || 0;
         let montoSolidarioNum = Number(montoSolidario) || 0;
         const montoAhorroNum = Number(montoAhorro) || 0;
 
-        if (pagoSolidario && montoSolidarioNum === 0 && montoCreditoNum > 0) {
-            montoSolidarioNum = montoCreditoNum;
-            montoCreditoNum = 0;
+        if (pagoSolidario) {
+            // Caso común: el frontend envía el monto solidario en montoPagado
+            if (montoSolidarioNum === 0 && montoCreditoNum > 0) {
+                montoSolidarioNum = montoCreditoNum;
+                montoCreditoNum = 0;
+            }
+
+            // Si el frontend envía el mismo valor en ambos campos, no restamos el solidario
+            if (montoSolidarioNum > 0 && montoCreditoNum === montoSolidarioNum) {
+                montoCreditoNum = 0;
+            }
         }
 
         const sumaTotal = montoCreditoNum + montoSolidarioNum + montoAhorroNum;
@@ -329,6 +337,22 @@ exports.registrarPago = async (req, res) => {
             }
             if (sumaTotal <= 0) {
                 return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
+            }
+
+            // Validar duplicado: mismo monto, método y fecha (mismo día)
+            const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
+            const existeDuplicado = (creditoOrigen.pagos || []).some(p => {
+                const fechaPagoExistente = new Date(p.fechaPago);
+                return (
+                    fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
+                    p.montoPagado === montoCreditoNum &&
+                    p.metodoPago === (metodoPago || 'EFECTIVO') &&
+                    p.montoSolidario === montoSolidarioNum &&
+                    p.montoAhorro === montoAhorroNum
+                );
+            });
+            if (existeDuplicado) {
+                return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
             }
 
             const numeroPago = (creditoOrigen.pagos || []).length + 1;
@@ -406,6 +430,19 @@ exports.registrarPago = async (req, res) => {
 
                 const creditoDestino = await Credito.findOne({ miembro: bId, estado: 'Activo' });
                 if (creditoDestino) {
+                    // Validar duplicado para cada beneficiario
+                    const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
+                    const existeDuplicado = (creditoDestino.pagos || []).some(p => {
+                        const fechaPagoExistente = new Date(p.fechaPago);
+                        return (
+                            fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
+                            p.montoSolidario === bMonto &&
+                            p.metodoPago === (metodoPago || 'EFECTIVO')
+                        );
+                    });
+                    if (existeDuplicado) {
+                        continue; // Saltar este beneficiario duplicado
+                    }
                     const numeroPagoB = (creditoDestino.pagos || []).length + 1;
                     const nuevoPagoDestino = {
                         numeroPago: numeroPagoB,
@@ -454,13 +491,13 @@ exports.registrarPago = async (req, res) => {
             const numeroPagoOrigen = (creditoOrigen.pagos || []).length + 1;
             const pagoMaster = {
                 numeroPago: numeroPagoOrigen,
-                montoPagado: montoCreditoNum,
+                montoPagado: 0,
                 efectivoCredito: efectivoCredito || 0,
                 transferenciaCredito: transferenciaCredito || 0,
                 tarjetaCredito: tarjetaCredito || 0,
                 depositoCredito: depositoCredito || 0,
 
-                pagoSolidario: false,
+                pagoSolidario: true,
                 montoSolidario: totalSolidarioOtorgado,
                 efectivoSolidario: efectivoSolidario || 0,
                 transferenciaSolidario: transferenciaSolidario || 0,
@@ -482,7 +519,9 @@ exports.registrarPago = async (req, res) => {
             };
 
             creditoOrigen.pagos.push(pagoMaster);
-            creditoOrigen.saldoPendiente -= montoCreditoNum;
+            if (montoCreditoNum > 0) {
+                creditoOrigen.saldoPendiente -= montoCreditoNum;
+            }
             if (montoAhorroNum > 0) {
                 creditoOrigen.ahorro.montoTotal = (creditoOrigen.ahorro.montoTotal || 0) + montoAhorroNum;
             }
@@ -530,6 +569,23 @@ exports.registrarPago = async (req, res) => {
         // El abono al CRÉDITO se toma según si es solidario o no
         const abonoAlCredito = (pagoSolidario && !recuperacionSolidario) ? montoSolidarioNum : montoCreditoNum;
 
+
+        // --- Validación de duplicado para pagos normales y solidarios ---
+        const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
+        const existeDuplicado = (creditoDestino.pagos || []).some(p => {
+            const fechaPagoExistente = new Date(p.fechaPago);
+            return (
+                fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
+                p.montoPagado === montoCreditoNum &&
+                p.montoSolidario === montoSolidarioNum &&
+                p.metodoPago === (metodoPago || 'EFECTIVO') &&
+                p.montoAhorro === montoAhorroNum
+            );
+        });
+        if (existeDuplicado) {
+            return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
+        }
+
         // --- CREACIÓN DEL REGISTRO DE PAGO ---
         let numeroPago;
         const pagosDestino = creditoDestino.pagos || [];
@@ -537,7 +593,7 @@ exports.registrarPago = async (req, res) => {
             numeroPago = 1;
         } else {
             const ultimoPago = pagosDestino[pagosDestino.length - 1];
-            const fechaAhora = fechaPago ? new Date(fechaPago) : new Date();
+            const fechaAhora = fechaPagoObj;
             const fechaUltimo = new Date(ultimoPago.fechaPago);
 
             if (fechaAhora.toDateString() === fechaUltimo.toDateString()) {
@@ -595,7 +651,10 @@ exports.registrarPago = async (req, res) => {
 
         // Restar saldo al crédito de destino
         // Si es recuperación, restamos montoCreditoNum. Si es apoyo, restamos montoSolidarioNum.
-        creditoDestino.saldoPendiente -= abonoAlCredito;
+        const esSolidarioMismoCredito = pagoSolidario && !recuperacionSolidario && creditoDestino._id && creditoOrigen._id && creditoDestino._id.toString() === creditoOrigen._id.toString();
+        if (!esSolidarioMismoCredito) {
+            creditoDestino.saldoPendiente -= abonoAlCredito;
+        }
 
         // --- GESTIÓN DE SALDO SOLIDARIO ---
         if (recuperacionSolidario) {

@@ -12,6 +12,10 @@ const miembroSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Grupo',
         required: true
+    },
+    ciclo: { 
+        type: Number,
+        required: false
     }
 }, { timestamps: true });
 

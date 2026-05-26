@@ -271,22 +271,36 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         const pagosSemana = credito.pagos.filter(p => p.numeroPago === semanaNumeroActual);
 
                         if (pagosSemana.length > 0) {
-                            const montoTotalSemana = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
+                            const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => acc + (p.montoPagado || 0), 0);
+                            // Solo contar solidarios RECIBIDOS (no los que otorgó el mismo)
+                            const montoSolidarioSemana = pagosSemana
+                                .filter(p => p.pagoSolidario === true && p.quienPrestoSolidario)
+                                .reduce((acc, p) => acc + (p.montoSolidario || 0), 0);
+                            
                             // Usar la fecha del primer pago de esa semana
                             const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
                             // zona horaria
                             fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
 
-                            const esAbonoSolidario = pagosSemana.some(p => p.pagoSolidario === true);
-                            tdBgStyle = esAbonoSolidario ? 'background-color: #ffedd5;' : '';
-                            let textColor = esAbonoSolidario ? 'color: #c2410c;' : 'color: #2563eb;';
-                            let dateColor = esAbonoSolidario ? 'color: #ea580c;' : 'color: #666;';
+                            const tieneSolidario = montoSolidarioSemana > 0;
+                            tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
 
-                            valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                        <span style="font-size: 7px; ${dateColor}">${fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' })}</span>
-                                        <span style="font-weight: bold; font-size: 10px; ${textColor}">${formatoMoneda(montoTotalSemana)}</span>
-                                      </div>`;
-                            sumasSemanalesMod[w] += montoTotalSemana;
+                            const lineas = [];
+                            if (montoPagoNormalSemana > 0) {
+                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: #2563eb;">${formatoMoneda(montoPagoNormalSemana)}</span>`);
+                            }
+                            if (montoSolidarioSemana > 0) {
+                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: #c2410c;">${formatoMoneda(montoSolidarioSemana)}</span>`);
+                            }
+
+                            if (lineas.length > 0) {
+                                valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                                            <span style="font-size: 7px; color: #666;">${fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' })}</span>
+                                            ${lineas.join('')}
+                                          </div>`;
+                            }
+
+                            sumasSemanalesMod[w] += montoPagoNormalSemana;
                         }
                     }
                     tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}">${valorCelda}</td>`;
@@ -372,6 +386,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
             let tablaIncrementoTbody = '';
             let sumaGarantiaInicial = 0;
+            // Sumas por semana para incremento de garantía
+            const sumIncrementoSemanas = new Array(maxSemanas).fill(0);
+            let sumaGarantiaFinalTotal = 0;
             creditosSubGrupo.forEach((credito, index) => {
                 const nombreCliente = credito.cliente
                     ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
@@ -405,7 +422,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                 montoSemana = pSemana.montoAhorro;
                             }
                         }
-                        
+
                         // 2. Fallback: Buscar en pagosAhorro independientes
                         if (montoSemana === 0 && credito.ahorro && credito.ahorro.pagosAhorro && credito.ahorro.pagosAhorro.length > 0) {
                             const ahorro = credito.ahorro.pagosAhorro[w - 1];
@@ -416,15 +433,19 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                         if (montoSemana > 0) {
                             valorCelda = `${formatoMoneda(montoSemana)}`;
+                            // Acumular en totales por semana
+                            sumIncrementoSemanas[w - 1] += montoSemana;
                         }
                     }
                     tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
                 }
-                
+
                 let totalAhorro = garantiaInicial;
                 if (llena && credito.ahorro) {
                     totalAhorro += (credito.ahorro.montoTotal || 0);
                 }
+                // Acumular garantía final total
+                sumaGarantiaFinalTotal += (llena ? totalAhorro : garantiaInicial);
                 let finalVal = llena ? `${formatoMoneda(totalAhorro)}` : '$ ';
                 tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
             });
@@ -439,9 +460,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
             for (let w = 1; w <= maxSemanas; w++) {
                 let label = semanaInicioReal + w - 1;
                 let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+                const sumaSemana = sumIncrementoSemanas[w - 1] || 0;
+                const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
+                tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
             }
-            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
+            const textoFinalGtia = llena ? `$ ${formatoMoneda(sumaGarantiaFinalTotal)}` : '$ ';
+            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoFinalGtia}</td></tr>`;
 
             // TABLA 3: REGISTRO DE SOLIDARIOS
             let tablaSolidariosThead = `
@@ -459,6 +483,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
             tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
 
             let tablaSolidariosTbody = '';
+            // Sumas por semana para solidarios
+            const sumSolidariosSemanas = new Array(maxSemanas).fill(0);
+            let sumaTotalSolidarios = 0;
             creditosSubGrupo.forEach((credito, index) => {
                 const nombreCliente = credito.cliente
                     ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
@@ -490,8 +517,13 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                 // Buscar pagos solidarios que coincidan con la semana (label)
                                 const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === label && p.pagoSolidario === true);
                                 for (const pSol of pagosSolSemana) {
+                                    // Caso 1: El solidario está en otro crédito (beneficiario) - quien recibió el solidario
                                     if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
-                                        montoAportadoPorElMiembro += pSol.montoPagado;
+                                        montoAportadoPorElMiembro += pSol.montoSolidario;
+                                    }
+                                    // Caso 2: El solidario está en su propio crédito (quien lo otorgó)
+                                    else if (otroCredito.miembro && otroCredito.miembro._id.toString() === contributorId && !pSol.quienPrestoSolidario) {
+                                        montoAportadoPorElMiembro += pSol.montoSolidario;
                                     }
                                 }
                             }
@@ -500,12 +532,16 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         if (montoAportadoPorElMiembro > 0) {
                             valorCelda = `${formatoMoneda(montoAportadoPorElMiembro)}`;
                             totalSolidarios += montoAportadoPorElMiembro;
+                            // Acumular en totales por semana
+                            sumSolidariosSemanas[w - 1] += montoAportadoPorElMiembro;
                         }
                     }
                     tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
                 }
                 let textTotalSol = llena && totalSolidarios > 0 ? `${formatoMoneda(totalSolidarios)}` : '$ ';
                 tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
+                // Acumular total final de solidarios por miembro
+                sumaTotalSolidarios += (llena ? totalSolidarios : 0);
             });
 
             // Total Solidarios
@@ -516,9 +552,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
             for (let w = 1; w <= maxSemanas; w++) {
                 let label = semanaInicioReal + w - 1;
                 let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">$ </td>`;
+                const sumaSemana = sumSolidariosSemanas[w - 1] || 0;
+                const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
+                tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
             }
-            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">$ </td></tr>`;
+            const textoTotalSolid = llena && sumaTotalSolidarios > 0 ? `$ ${formatoMoneda(sumaTotalSolidarios)}` : '$  ';
+            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoTotalSolid}</td></tr>`;
 
             // 5. TEMPLATE FINAL Y PDF
 

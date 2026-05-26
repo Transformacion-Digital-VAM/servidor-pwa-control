@@ -10,6 +10,10 @@ const clienteSchema = new mongoose.Schema({
         type: String,
         required: false
     },
+    horaVisita: {
+        type: String,
+        required: true
+    },
     diaPago: {
         type: String,
         required: true

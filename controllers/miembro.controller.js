@@ -3,7 +3,7 @@ const Grupo = require('../models/Grupo');
 
 exports.createMiembro = async (req, res) => {
     try {
-        const { nombre, apellidos, grupo, rol, pagoPactado } = req.body;
+        const { nombre, apellidos, grupo, rol, pagoPactado, ciclo } = req.body;
 
         // Verificar que el grupo exista
         const grupoExiste = await Grupo.findById(grupo);
@@ -16,7 +16,8 @@ exports.createMiembro = async (req, res) => {
             apellidos,
             grupo,
             rol,
-            pagoPactado
+            pagoPactado,
+            ciclo
         });
 
         await nuevoMiembro.save();
