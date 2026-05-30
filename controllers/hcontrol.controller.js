@@ -150,7 +150,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                 fechas.push({
                     numero: semanaInicioReal + i,
-                    fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    fecha: nueva.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+                    fechaObj: new Date(nueva)
                 });
             }
             return fechas;
@@ -279,15 +280,26 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             
                             // Usar la fecha del primer pago de esa semana
                             const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
-                            // zona horaria
                             fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
+                            fechaSemanaObj.setHours(0, 0, 0, 0);
 
+                            const fechaProgramadaObj = new Date(calendario[w].fechaObj);
+                            fechaProgramadaObj.setHours(0, 0, 0, 0);
+
+                            const estaAtrasado = pagosSemana.some(pago => {
+                                const fechaPago = new Date(pago.fechaPago);
+                                fechaPago.setMinutes(fechaPago.getMinutes() + fechaPago.getTimezoneOffset());
+                                fechaPago.setHours(0, 0, 0, 0);
+                                return fechaPago > fechaProgramadaObj;
+                            });
+
+                            const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
                             const tieneSolidario = montoSolidarioSemana > 0;
                             tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
 
                             const lineas = [];
                             if (montoPagoNormalSemana > 0) {
-                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: #2563eb;">${formatoMoneda(montoPagoNormalSemana)}</span>`);
+                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${formatoMoneda(montoPagoNormalSemana)}</span>`);
                             }
                             if (montoSolidarioSemana > 0) {
                                 lineas.push(`<span style="font-weight: bold; font-size: 10px; color: #c2410c;">${formatoMoneda(montoSolidarioSemana)}</span>`);
@@ -437,15 +449,15 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             sumIncrementoSemanas[w - 1] += montoSemana;
                         }
                     }
-                    tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #059669;">${valorCelda}</td>`;
+                    tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold;">${valorCelda}</td>`;
                 }
 
-                let totalAhorro = garantiaInicial;
+                let totalAhorro = 0;
                 if (llena && credito.ahorro) {
                     totalAhorro += (credito.ahorro.montoTotal || 0);
                 }
                 // Acumular garantía final total
-                sumaGarantiaFinalTotal += (llena ? totalAhorro : garantiaInicial);
+                sumaGarantiaFinalTotal += (llena ? totalAhorro : 0);
                 let finalVal = llena ? `${formatoMoneda(totalAhorro)}` : '$ ';
                 tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
             });
