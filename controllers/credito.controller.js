@@ -296,12 +296,14 @@ exports.registrarPago = async (req, res) => {
     try {
         const { id } = req.params; // ID del crédito desde el cual se registra el pago 
         const {
-            montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, metodoPago,
+            montoPagado, fechaPago, pagoSolidario, miembro: beneficiarioId, beneficiario, beneficiarioId: beneficiarioIdAlt, metodoPago,
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
             recuperacionSolidario, numeroRecibo, ubicacion
         } = req.body;
+
+        const beneficiarioFinal = beneficiarioId || beneficiario || beneficiarioIdAlt || (req.body.beneficiario && req.body.beneficiario.miembro);
 
         // 1. Obtener el crédito 
         const creditoOrigen = await Credito.findById(id);
@@ -545,14 +547,14 @@ exports.registrarPago = async (req, res) => {
 
         let creditoDestino;
 
-        if (pagoSolidario && (montoSolidarioNum > 0 || beneficiarioId)) {
-            // Caso Solidario: El dinero se abona al crédito del beneficiario (enviado como 'miembro' en el body)
-            if (!beneficiarioId) {
-                return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro)' });
+        if (pagoSolidario && (montoSolidarioNum > 0 || beneficiarioFinal)) {
+            // Caso Solidario: El dinero se abona al crédito del beneficiario
+            if (!beneficiarioFinal) {
+                return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro o beneficiario)' });
             }
 
             // Buscar el crédito activo del beneficiario
-            creditoDestino = await Credito.findOne({ miembro: beneficiarioId, estado: 'Activo' });
+            creditoDestino = await Credito.findOne({ miembro: beneficiarioFinal, estado: 'Activo' });
 
             if (!creditoDestino) {
                 return res.status(404).json({ ok: false, msg: 'No se encontró un crédito activo para el beneficiario seleccionado' });
