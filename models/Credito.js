@@ -38,7 +38,7 @@ const creditoSchema = new mongoose.Schema({
     pagos: [{
         numeroPago: { type: Number, required: true },
         // 1. PAGO DEL CRÉDITO (Liquidación / Abono)
-        montoPagado: { type: Number, required: true },
+        montoPagado: { type: Number, required: false },
         efectivoCredito: { type: Number, default: 0 },
         transferenciaCredito: { type: Number, default: 0 },
         tarjetaCredito: { type: Number, default: 0 },
@@ -67,11 +67,7 @@ const creditoSchema = new mongoose.Schema({
         },
         totalPagado: { type: Number, required: true },
         metodoPagoSolidario: { type: String, required: false },
-        miembro: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Miembro',
-            required: false
-        },
+        // Quien presta el solidario: se auto-asigna desde el miembro del crédito raíz
         quienPrestoSolidario: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Miembro',
@@ -79,18 +75,20 @@ const creditoSchema = new mongoose.Schema({
                 return this.pagoSolidario === true;
             }
         },
+        // Beneficiarios del solidario: quiénes reciben la ayuda
+        beneficiariosSolidarios: [{
+            miembro: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Miembro',
+                required: true
+            },
+            monto: { type: Number, required: true }
+        }],
         recuperacionSolidario: {
             type: Boolean,
             default: false
         },
         numeroRecibo: { type: Number, required: false },
-        detallesSolidario: [{
-            miembro: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'Miembro'
-            },
-            monto: { type: Number }
-        }],
         ubicacion: {
             latitud: { type: Number, required: false },
             longitud: { type: Number, required: false }

@@ -300,21 +300,13 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion, quienPrestoSolidario
+            recuperacionSolidario, numeroRecibo, ubicacion
         } = req.body;
 
         // 1. Obtener el crédito 
         const creditoOrigen = await Credito.findById(id);
         if (!creditoOrigen) {
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
-        }
-
-        // VALIDACIÓN: Si es pago solidario, quienPrestoSolidario es requerido
-        if (pagoSolidario && !recuperacionSolidario && !quienPrestoSolidario) {
-            return res.status(400).json({ 
-                ok: false, 
-                msg: 'Debe especificar quién otorga el apoyo solidario (campo quienPrestoSolidario)' 
-            });
         }
 
         // --- NORMALIZACIÓN DE MONTOS ---
@@ -404,8 +396,8 @@ exports.registrarPago = async (req, res) => {
                     creditoOrigen.saldoSolidario = Math.max(0, (creditoOrigen.saldoSolidario || 0) - montoCreditoNum);
                 } else {
                     creditoOrigen.saldoSolidario = (creditoOrigen.saldoSolidario || 0) + montoSolidarioNum;
-                            // Ya validamos que quienPrestoSolidario existe arriba
-                    nuevoPago.quienPrestoSolidario = quienPrestoSolidario;
+                    // Auto-asignar quién presta el solidario (el miembro del crédito)
+                    nuevoPago.quienPrestoSolidario = creditoOrigen.miembro;
                 }
             }
 
@@ -429,10 +421,10 @@ exports.registrarPago = async (req, res) => {
         // --- FIN DE MANEJO DE CRÉDITO INDIVIDUAL ---
 
         // --- MANEJO DE MÚLTIPLES BENEFICIARIOS (APOYO SOLIDARIO) ---
-        if (pagoSolidario && !recuperacionSolidario && Array.isArray(req.body.beneficiarios)) {
+        if (pagoSolidario && !recuperacionSolidario && Array.isArray(req.body.beneficiariosSolidarios)) {
             let totalSolidarioOtorgado = 0;
 
-            for (const item of req.body.beneficiarios) {
+            for (const item of req.body.beneficiariosSolidarios) {
                 const bId = item.miembro;
                 const bMonto = Number(item.monto);
 
@@ -443,7 +435,7 @@ exports.registrarPago = async (req, res) => {
                     const existeDuplicado = (creditoDestino.pagos || []).some(p => {
                         const fechaPagoExistente = new Date(p.fechaPago);
                         // Solo considerar duplicado si el mismo originador ya registró el mismo solidario ese día
-                        const mismoOrigen = p.quienPrestoSolidario && quienPrestoSolidario && p.quienPrestoSolidario.toString() === quienPrestoSolidario.toString();
+                        const mismoOrigen = p.quienPrestoSolidario && creditoOrigen.miembro && p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString();
                         return (
                             fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
                             p.montoSolidario === bMonto &&
@@ -479,8 +471,8 @@ exports.registrarPago = async (req, res) => {
                         fechaPago: fechaPago || new Date(),
                         metodoPago: metodoPago || 'EFECTIVO',
                         totalPagado: (creditoDestino.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0) + bMonto,
-                        miembro: bId,
-                        quienPrestoSolidario: quienPrestoSolidario,
+                        // Auto-asignar quién presta (desde el crédito de origen)
+                        quienPrestoSolidario: creditoOrigen.miembro,
                         numeroRecibo: numeroRecibo || null,
                         ...(ubicacion ? { ubicacion } : {})
                     };
@@ -521,12 +513,13 @@ exports.registrarPago = async (req, res) => {
                 tarjetaAhorro: tarjetaAhorro || 0,
                 depositoAhorro: depositoAhorro || 0,
 
-                detallesSolidario: req.body.beneficiarios,
+                beneficiariosSolidarios: req.body.beneficiariosSolidarios,
+                // Auto-asignar quién presta (desde su propio miembro)
+                quienPrestoSolidario: creditoOrigen.miembro,
                 fechaPago: fechaPago || new Date(),
                 metodoPago: metodoPago || 'EFECTIVO',
                 totalPagado: (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0) + montoCreditoNum,
                 numeroRecibo: numeroRecibo || null,
-                quienPrestoSolidario: quienPrestoSolidario,
                 ...(ubicacion ? { ubicacion } : {})
             };
 
@@ -586,8 +579,8 @@ exports.registrarPago = async (req, res) => {
         const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
         const existeDuplicado = (creditoDestino.pagos || []).some(p => {
             const fechaPagoExistente = new Date(p.fechaPago);
-            const mismoOrigenSolidario = pagoSolidario && !recuperacionSolidario && p.quienPrestoSolidario && quienPrestoSolidario
-                ? p.quienPrestoSolidario.toString() === quienPrestoSolidario.toString()
+            const mismoOrigenSolidario = pagoSolidario && !recuperacionSolidario && p.quienPrestoSolidario && creditoOrigen.miembro
+                ? p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString()
                 : true;
             return (
                 fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
@@ -650,14 +643,13 @@ exports.registrarPago = async (req, res) => {
             metodoPago: metodoPago || 'EFECTIVO',
             numeroRecibo: numeroRecibo || null,
             totalPagado: nuevoTotalPagado,
-            miembro: creditoDestino.miembro,
 
             // Solo asignar si es un apoyo a un TERCERO, no si es recuperación a uno mismo
-            quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? quienPrestoSolidario : undefined,
+            quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? creditoOrigen.miembro : undefined,
             
-            // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array 'beneficiarios')
+            // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array 'beneficiariosSolidarios')
             // Si es recuperación, guardamos a quién le devolvió
-            detallesSolidario: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && req.body.beneficiarios ? req.body.beneficiarios : undefined,
+            beneficiariosSolidarios: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && req.body.beneficiariosSolidarios ? req.body.beneficiariosSolidarios : undefined,
 
             ...(ubicacion ? { ubicacion } : {})
         };

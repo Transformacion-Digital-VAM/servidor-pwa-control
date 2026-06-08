@@ -273,10 +273,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                         if (pagosSemana.length > 0) {
                             const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => acc + (p.montoPagado || 0), 0);
-                            // Solo contar solidarios RECIBIDOS (no los que otorgó el mismo)
-                            const montoSolidarioSemana = pagosSemana
-                                .filter(p => p.pagoSolidario === true && p.quienPrestoSolidario)
-                                .reduce((acc, p) => acc + (p.montoSolidario || 0), 0);
+                            // Verificar si hay solidarios RECIBIDOS (solo para colorear el fondo)
+                            const tieneSolidario = pagosSemana.some(p => p.pagoSolidario === true && p.quienPrestoSolidario);
                             
                             // Usar la fecha del primer pago de esa semana
                             const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
@@ -294,21 +292,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             });
 
                             const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
-                            const tieneSolidario = montoSolidarioSemana > 0;
                             tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
 
-                            const lineas = [];
+                            let valorCelda2 = '';
                             if (montoPagoNormalSemana > 0) {
-                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${formatoMoneda(montoPagoNormalSemana)}</span>`);
-                            }
-                            if (montoSolidarioSemana > 0) {
-                                lineas.push(`<span style="font-weight: bold; font-size: 10px; color: #c2410c;">${formatoMoneda(montoSolidarioSemana)}</span>`);
-                            }
-
-                            if (lineas.length > 0) {
+                                const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
                                 valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                            <span style="font-size: 7px; color: #666;">${fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' })}</span>
-                                            ${lineas.join('')}
+                                            <span style="font-size: 7px; color: #666;">${fechaFormato}</span>
+                                            <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${formatoMoneda(montoPagoNormalSemana)}</span>
                                           </div>`;
                             }
 
