@@ -272,9 +272,26 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         const pagosSemana = credito.pagos.filter(p => p.numeroPago === semanaNumeroActual);
 
                         if (pagosSemana.length > 0) {
-                            const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => acc + (p.montoPagado || 0), 0);
+                            const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => {
+                                let monto = p.montoPagado || 0;
+                                // Agregar montoSolidario solo si fue RECIBIDO (no si fue otorgado)
+                                // Si quienPrestoSolidario es diferente al miembro actual, significa que fue beneficiario
+                                if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
+                                    const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                                    const miembroId = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
+                                    if (prestoId !== miembroId) {
+                                        monto += p.montoSolidario || 0;
+                                    }
+                                }
+                                return acc + monto;
+                            }, 0);
                             // Verificar si hay solidarios RECIBIDOS (solo para colorear el fondo)
-                            const tieneSolidario = pagosSemana.some(p => p.pagoSolidario === true && p.quienPrestoSolidario);
+                            const miembroIdStr = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
+                            const tieneSolidario = pagosSemana.some(p => {
+                                if (p.pagoSolidario !== true || !p.quienPrestoSolidario) return false;
+                                const prestoIdStr = p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                                return prestoIdStr !== miembroIdStr;
+                            });
                             
                             // Usar la fecha del primer pago de esa semana
                             const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
@@ -521,10 +538,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                 const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === label && p.pagoSolidario === true);
                                 for (const pSol of pagosSolSemana) {
                                     // Caso 1: El solidario está en otro crédito (beneficiario) - quien recibió el solidario
-                                    if (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString() === contributorId) {
+                                    const prestoId = pSol.quienPrestoSolidario && pSol.quienPrestoSolidario._id
+                                        ? pSol.quienPrestoSolidario._id.toString()
+                                        : (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString ? pSol.quienPrestoSolidario.toString() : pSol.quienPrestoSolidario);
+                                    // Contar solo el solidario registrado en el propio crédito del miembro,
+                                    // para no duplicar el aporte desde el crédito beneficiario.
+                                    if (otroCredito._id && credito._id && otroCredito._id.toString() === credito._id.toString() && prestoId === contributorId) {
                                         montoAportadoPorElMiembro += pSol.montoSolidario;
                                     }
-                                    // Caso 2: El solidario está en su propio crédito (quien lo otorgó)
                                     else if (otroCredito.miembro && otroCredito.miembro._id.toString() === contributorId && !pSol.quienPrestoSolidario) {
                                         montoAportadoPorElMiembro += pSol.montoSolidario;
                                     }
@@ -721,7 +742,18 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 if (creditoActual.pagos) {
                     const pagosSemana = creditoActual.pagos.filter(p => p.numeroPago === semanaNumeroActual);
                     if (pagosSemana.length > 0) {
-                        pagoReal = pagosSemana.reduce((acc, p) => acc + p.montoPagado, 0);
+                        pagoReal = pagosSemana.reduce((acc, p) => {
+                            let monto = p.montoPagado || 0;
+                            // Agregar montoSolidario solo si fue RECIBIDO (no si fue otorgado)
+                            if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
+                                const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                                const miembroId = creditoActual.miembro && creditoActual.miembro._id ? creditoActual.miembro._id.toString() : (creditoActual.miembro && creditoActual.miembro.toString ? creditoActual.miembro.toString() : creditoActual.miembro);
+                                if (prestoId !== miembroId) {
+                                    monto += p.montoSolidario || 0;
+                                }
+                            }
+                            return acc + monto;
+                        }, 0);
                         foundPayment = true;
                     }
                 }
