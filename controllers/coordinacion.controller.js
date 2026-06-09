@@ -43,7 +43,7 @@ exports.crearCoordinacion = async (req, res) => {
 
 exports.obtenerAsesores = async (req, res) => {
     try {
-        const asesores = await User.find({ role: 'asesor' }, {
+        const asesores = await User.find({ role: { $in: ['asesor', 'master'] } }, {
             username: 1,
             coordinacion: 1,
             lastLocation: 1,
@@ -59,7 +59,7 @@ exports.obtenerAsesores = async (req, res) => {
 exports.obtenerAsesoresCoordinacion = async (req, res) => {
     try {
         const { coordinacion } = req.params;
-        const asesores = await User.find({ role: 'asesor', coordinacion }, {
+        const asesores = await User.find({ role: { $in: ['asesor', 'master'] }, coordinacion }, {
             username: 1,
             coordinacion: 1,
             lastLocation: 1,
