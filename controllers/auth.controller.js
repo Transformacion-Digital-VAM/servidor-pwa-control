@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 exports.registerUser = async (req, res) => {
-    const { username, password, role, coordinacion } = req.body;
+    const { username, nombre, password, role, coordinacion } = req.body;
 
     try {
         const existUser = await User.findOne({ username });
@@ -15,6 +15,7 @@ exports.registerUser = async (req, res) => {
 
         const newUser = new User({
             username,
+            nombre,
             password,
             role: role || 'asesor',
             coordinacion
@@ -74,7 +75,7 @@ exports.loginController = async (req, res) => {
 exports.updateLocation = async (req, res) => {
     try {
         const { lat, lng, timestamp } = req.body;
-        
+
         if (!lat || !lng) {
             return res.status(400).json({ message: 'Latitiud y longitud son requeridas' });
         }
@@ -91,7 +92,7 @@ exports.updateLocation = async (req, res) => {
         };
 
         await user.save();
-        
+
         res.status(200).json({ message: 'Ubicación actualizada correctamente', location: user.lastLocation });
     } catch (error) {
         console.error('Error updating location:', error);
@@ -103,8 +104,8 @@ exports.getAllLocations = async (req, res) => {
     try {
         // Verificar si el usuario que hace la petición es 'master' o 'superadmin'
         if (req.user.role !== 'master' && req.user.role !== 'superadmin') {
-            return res.status(403).json({ 
-                message: 'Acceso denegado. Solo el rol master o superadmin puede obtener ubicaciones de otros usuarios.' 
+            return res.status(403).json({
+                message: 'Acceso denegado. Solo el rol master o superadmin puede obtener ubicaciones de otros usuarios.'
             });
         }
 

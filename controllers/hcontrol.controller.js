@@ -310,20 +310,24 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                             const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
                             tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
+                            
 
                             let valorCelda2 = '';
                             if (montoPagoNormalSemana > 0) {
                                 const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
+                                const textoMonto = pagosSemana.some(p => p.pagoSolidario === true)
+                                    ? `${formatoMoneda(montoPagoNormalSemana)} / SOL`
+                                    : formatoMoneda(montoPagoNormalSemana);
                                 valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
                                             <span style="font-size: 7px; color: #666;">${fechaFormato}</span>
-                                            <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${formatoMoneda(montoPagoNormalSemana)}</span>
+                                            <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${textoMonto}</span>
                                           </div>`;
                             }
 
                             sumasSemanalesMod[w] += montoPagoNormalSemana;
                         }
                     }
-                    tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}">${valorCelda}</td>`;
+                    tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}; ">${valorCelda}</td>`;
                 }
                 let sfVal = '';
                 if (llena) sfVal = `${formatoMoneda(credito.saldoPendiente)}`;

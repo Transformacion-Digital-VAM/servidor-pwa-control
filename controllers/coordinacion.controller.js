@@ -61,6 +61,7 @@ exports.obtenerAsesoresCoordinacion = async (req, res) => {
         const { coordinacion } = req.params;
         const asesores = await User.find({ role: 'asesor', coordinacion }, {
             username: 1,
+            nombre: 1,
             coordinacion: 1,
             lastLocation: 1,
         });
