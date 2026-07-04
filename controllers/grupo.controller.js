@@ -1,4 +1,5 @@
 const Grupo = require('../models/Grupo');
+const Credito = require('../models/Credito');
 
 exports.createGrupo = async (req, res) => {
     try {
@@ -119,3 +120,63 @@ exports.deleteGrupo = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 }
+
+
+exports.getCicloSemanaGrupo = async (req, res) => {
+    try {
+        const { grupoId } = req.params;
+
+        // Buscar el grupo
+        const grupo = await Grupo.findById(grupoId);
+
+        if (!grupo) {
+            return res.status(404).json({
+                success: false,
+                message: 'El grupo no existe'
+            });
+        }
+
+        // Verificar que tenga integrantes
+        if (!grupo.integrantes || grupo.integrantes.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'El grupo no tiene integrantes'
+            });
+        }
+
+        // Tomar el primer integrante
+        const primerMiembro = grupo.integrantes[0];
+
+        // Buscar el crédito activo del primer integrante
+        const credito = await Credito.findOne({
+            miembro: primerMiembro,
+            estado: 'Activo'
+        }).sort({ ciclo: -1 });
+
+        if (!credito) {
+            return res.status(404).json({
+                success: false,
+                message: 'No se encontró un crédito activo para el grupo'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                grupoId: grupo._id,
+                miembroReferencia: primerMiembro,
+                cicloActual: credito.ciclo,
+                semanaActual: credito.semanaActual
+            }
+        });
+
+    } catch (error) {
+        console.error('Error al obtener ciclo y semana:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor',
+            error: error.message
+        });
+    }
+};
