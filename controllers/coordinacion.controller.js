@@ -45,6 +45,7 @@ exports.obtenerAsesores = async (req, res) => {
     try {
         const asesores = await User.find({ role: { $in: ['asesor', 'master'] } }, {
             username: 1,
+            nombre: 1,
             coordinacion: 1,
             lastLocation: 1,
         }).populate('coordinacion', 'nombre municipio');

@@ -31,7 +31,7 @@ exports.getGrupos = async (req, res) => {
         // Si es admin, query = {} (ve todo)
 
         const grupos = await Grupo.find(query)
-            .populate('asesor', 'username')
+            .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre')
             .populate('integrantes');
 
@@ -45,7 +45,7 @@ exports.getGrupoById = async (req, res) => {
     try {
         const grupo = await Grupo.findById(req.params.id)
             .populate('integrantes')
-            .populate('asesor', 'username')
+            .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre');
 
         if (!grupo) return res.status(404).json({ message: "Grupo no encontrado" });
@@ -69,7 +69,7 @@ exports.getGruposPorCoordinacion = async (req, res) => {
     try {
         const { coordinacion } = req.params;
         const grupos = await Grupo.find({ coordinacion: coordinacion })
-            .populate('asesor', 'username')
+            .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre')
             .populate('integrantes');
 
@@ -83,7 +83,7 @@ exports.getGruposPorAsesor = async (req, res) => {
     try {
         const { asesor } = req.params;
         const grupos = await Grupo.find({ asesor: asesor })
-            .populate('asesor', 'username')
+            .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre')
             .populate('integrantes');
 

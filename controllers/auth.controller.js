@@ -62,6 +62,7 @@ exports.loginController = async (req, res) => {
             user: {
                 id: user._id,
                 username: user.username,
+                nombre: user.nombre,
                 role: user.role,
                 coordinacion: user.coordinacion
             }

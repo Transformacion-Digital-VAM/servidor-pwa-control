@@ -727,7 +727,7 @@ exports.getPagosConUbicacion = async (req, res) => {
             populate: {
                 path: 'grupo',
                 select: 'nombre clave asesor',
-                populate: { path: 'asesor', select: 'username' }
+                populate: { path: 'asesor', select: 'username nombre' }
             }
         })
         .populate({ path: 'cliente', select: 'nombre' })
