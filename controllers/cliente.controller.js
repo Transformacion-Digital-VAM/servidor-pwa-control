@@ -21,7 +21,7 @@ exports.getCliente = async (req, res) => {
         } else if (req.user.role === 'coordinador') {
             query = { coordinacion: req.user.coordinacion };
         }
-        const cliente = await Cliente.find(query).populate('coordinacion', 'nombre').populate('asesor', 'username');
+        const cliente = await Cliente.find(query).populate('coordinacion', 'nombre').populate('asesor', 'username nombre');
         res.status(200).json(cliente);
     } catch (error) {
         res.status(500).json({ message: error.message });
