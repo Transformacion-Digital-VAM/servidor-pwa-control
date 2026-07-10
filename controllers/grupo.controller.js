@@ -126,8 +126,8 @@ exports.getCicloSemanaGrupo = async (req, res) => {
     try {
         const { grupoId } = req.params;
 
-        // Buscar el grupo
-        const grupo = await Grupo.findById(grupoId);
+        // Buscar el grupo (con datos de sus integrantes)
+        const grupo = await Grupo.findById(grupoId).populate('integrantes');
 
         if (!grupo) {
             return res.status(404).json({
@@ -166,7 +166,8 @@ exports.getCicloSemanaGrupo = async (req, res) => {
                 grupoId: grupo._id,
                 miembroReferencia: primerMiembro,
                 cicloActual: credito.ciclo,
-                semanaActual: credito.semanaActual
+                semanaActual: credito.semanaActual,
+                integrantes: grupo.integrantes
             }
         });
 

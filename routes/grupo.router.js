@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const coordinacionController = require('../controllers/coordinacion.controller');
 const grupoController = require('../controllers/grupo.controller');
+
 const { verifyToken } = require('../middlewares/auth.middleware');
 
 // GRUPOS
