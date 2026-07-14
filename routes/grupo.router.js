@@ -27,6 +27,7 @@ router.post('/coordinacion', coordinacionController.crearCoordinacion); //verify
 //ASESORES
 router.get('/asesores', coordinacionController.obtenerAsesores); //verifyToken
 router.get('/asesores/:coordinacion', coordinacionController.obtenerAsesoresCoordinacion); //verifyToken
+router.get('/asesores/grupo/:grupoId', grupoController.obtenerAsesorGrupo); //verifyToken
 
 router.get("/getCicloSemanaGrupo/:grupoId", grupoController.getCicloSemanaGrupo); //verifyToken
 

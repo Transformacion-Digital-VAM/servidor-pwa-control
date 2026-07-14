@@ -181,3 +181,15 @@ exports.getCicloSemanaGrupo = async (req, res) => {
         });
     }
 };
+
+
+exports.obtenerAsesorGrupo = async (req, res) => {
+    try {
+        const { grupoId } = req.params;
+        const grupo = await Grupo.findById(grupoId)
+            .populate('asesor', 'username nombre');
+        res.status(200).json(grupo);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+}
