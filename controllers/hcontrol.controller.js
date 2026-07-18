@@ -831,11 +831,38 @@ exports.generarHojaControlIndividual = async (req, res) => {
         }
 
         // Obtener el día de la semana de fechaBasica
+        // const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
+        // const baseDate = new Date(fechaBasica);
+        // baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
+        // const diaPago = diasSemana[baseDate.getDay()];
+        // Obtener el día de pago (priorizando el registrado en el cliente)
         const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
         const baseDate = new Date(fechaBasica);
         baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
-        const diaPago = diasSemana[baseDate.getDay()];
-
+        
+        let diaPago = "";
+        
+        // 1. Verificamos si el cliente tiene un día de pago registrado en BD
+        if (credito.cliente && credito.cliente.diaPago) {
+            const diaReg = credito.cliente.diaPago.toUpperCase().trim();
+            
+            // Si capturaron SOLO el número (ej: "18"), le agregamos " DE CADA MES"
+            if (/^\d+$/.test(diaReg)) {
+                diaPago = `${diaReg} DE CADA MES`;
+            } else {
+                // Si ya dice "18 DE CADA MES" o "LUNES", lo dejamos tal cual
+                diaPago = diaReg;
+            }
+        } 
+        // 2. Si no hay nada registrado, pero la frecuencia es Mensual, lo sacamos de la fecha
+        else if ((credito.frecuenciaPago || "").toUpperCase() === 'MENSUAL') {
+            diaPago = `${baseDate.getDate()} DE CADA MES`;
+        } 
+        // 3. Fallback: Si es semanal/quincenal y no hay registro, ponemos el día de la semana (ej. SÁBADO)
+        else {
+            diaPago = diasSemana[baseDate.getDay()];
+        }
+        
         const asesorStr = credito.cliente && credito.cliente.asesor
             ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
             : "________________";
