@@ -665,7 +665,13 @@ exports.generarHojaControlIndividual = async (req, res) => {
     const { clienteId, ciclo } = req.params;
 
     try {
-        let creditos = await Credito.find({ cliente: clienteId })
+        let creditos = await Credito.find({
+            $or: [
+                { cliente: clienteId },
+                { miembro: clienteId },
+                { _id: clienteId }
+            ]
+        })
             .populate({
                 path: 'cliente',
                 populate: { path: 'asesor' }
@@ -676,7 +682,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
         let credito = creditos.find(c => c.ciclo == ciclo);
 
         if (!credito && creditos.length > 0) {
-            // Fallback si la BD no guardo el ciclo
+            // Fallback si la BD no guardó el ciclo
             credito = creditos[0];
         }
 
@@ -685,7 +691,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
         }
 
         const formatoMoneda = (num) =>
-            Number(num).toLocaleString('es-MX', {
+            Number(num || 0).toLocaleString('es-MX', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             });
@@ -743,22 +749,46 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 const semanaNumeroActual = semanaInicioReal + i;
                 let pagoReal = 0;
                 let foundPayment = false;
+                let fechaPagoRealStr = '';
                 if (creditoActual.pagos) {
                     const pagosSemana = creditoActual.pagos.filter(p => p.numeroPago === semanaNumeroActual);
                     if (pagosSemana.length > 0) {
                         pagoReal = pagosSemana.reduce((acc, p) => {
-                            let monto = p.montoPagado || 0;
+                            let monto = (p.montoPagado !== undefined && p.montoPagado !== null && p.montoPagado > 0)
+                                ? p.montoPagado
+                                : (p.totalPagado || 0);
                             // Agregar montoSolidario solo si fue RECIBIDO (no si fue otorgado)
                             if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
-                                const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
-                                const miembroId = creditoActual.miembro && creditoActual.miembro._id ? creditoActual.miembro._id.toString() : (creditoActual.miembro && creditoActual.miembro.toString ? creditoActual.miembro.toString() : creditoActual.miembro);
-                                if (prestoId !== miembroId) {
+                                const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : String(p.quienPrestoSolidario);
+                                let idEntidad = null;
+                                if (creditoActual.miembro) {
+                                    idEntidad = creditoActual.miembro._id ? creditoActual.miembro._id.toString() : String(creditoActual.miembro);
+                                } else if (creditoActual.cliente) {
+                                    idEntidad = creditoActual.cliente._id ? creditoActual.cliente._id.toString() : String(creditoActual.cliente);
+                                }
+                                if (idEntidad && prestoId !== idEntidad) {
                                     monto += p.montoSolidario || 0;
                                 }
                             }
                             return acc + monto;
                         }, 0);
                         foundPayment = true;
+
+                        try {
+                            const ultimoPago = pagosSemana[pagosSemana.length - 1];
+                            const rawFecha = ultimoPago ? (ultimoPago.fechaPago || ultimoPago.createdAt || ultimoPago.fecha) : null;
+                            if (rawFecha) {
+                                const dPago = new Date(rawFecha);
+                                if (!isNaN(dPago.getTime())) {
+                                    dPago.setMinutes(dPago.getMinutes() + dPago.getTimezoneOffset());
+                                    fechaPagoRealStr = dPago.toLocaleDateString('es-MX', {
+                                        day: '2-digit', month: '2-digit'
+                                    });
+                                }
+                            }
+                        } catch (errF) {
+                            console.error('Error al formatear fechaPagoReal:', errF);
+                        }
                     }
                 }
 
@@ -770,6 +800,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 fechas.push({
                     numero: semanaNumeroActual,
                     fecha: fechaStr,
+                    fechaPagoReal: fechaPagoRealStr,
                     saldoInicial: saldoInicialRow,
                     pago: (llena && foundPayment) ? pagoReal : (llena ? 0 : pagoPactado),
                     saldoFinal: saldoFinalRow,
@@ -792,13 +823,23 @@ exports.generarHojaControlIndividual = async (req, res) => {
             const p = row.llena ? (row.found ? formatoMoneda(row.pago) : '') : '';
             const sf = row.llena ? (row.found ? formatoMoneda(row.saldoFinal) : '') : '';
 
+            const siCell = si ? `<div class="align-money"><span>$</span> <span>${si}</span></div>` : '';
+            
+            let pContent = p;
+            if (row.llena && row.found && row.fechaPagoReal) {
+                pContent += ` <span style="font-size:9px; font-weight:bold; color:#1e3a8a;">(${row.fechaPagoReal})</span>`;
+            }
+            const pCell = p ? `<div class="align-money"><span>$</span> <span>${pContent}</span></div>` : '';
+
+            const sfCell = sf ? `<div class="align-money"><span>$</span> <span>${sf}</span></div>` : '';
+
             tablaAmortizacionTbody += `
                 <tr>
                     <td align="center" style="font-weight:bold;">${row.numero}</td>
                     <td align="center" style="font-weight:bold;">${row.fecha}</td>
-                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${si}</span></div></td>
-                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${p}</span></div></td>
-                    <td style="font-weight:bold;"><div class="align-money"><span>$</span> <span>${sf}</span></div></td>
+                    <td style="font-weight:bold;">${siCell}</td>
+                    <td style="font-weight:bold;">${pCell}</td>
+                    <td style="font-weight:bold;">${sfCell}</td>
                 </tr>
             `;
         });
