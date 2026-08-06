@@ -53,12 +53,16 @@ exports.crearCredito = async (req, res) => {
             ? req.body.saldoTotal
             : (pagoPactadoCalc * numSemanas);
 
-        const mongoose = require('mongoose');
         const query = {
-            miembro: tipoCredito !== 'Individual' ? miembro : new mongoose.Types.ObjectId(),
             ciclo,
             tipoCredito
         };
+
+        if (tipoCredito === 'Individual') {
+            query.cliente = cliente;
+        } else {
+            query.miembro = miembro;
+        }
 
         const dataToSave = {
             cliente: tipoCredito === 'Individual' ? cliente : null,
@@ -83,11 +87,26 @@ exports.crearCredito = async (req, res) => {
             semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, req.body.frecuenciaPago || 'Semanal')
         };
 
+        if (tipoCredito !== 'Individual') {
+            dataToSave.miembro = miembro;
+        }
+
+        const updateDoc = {
+            $set: dataToSave
+        };
+
+        if (tipoCredito === 'Individual') {
+            const mongoose = require('mongoose');
+            updateDoc.$setOnInsert = {
+                miembro: new mongoose.Types.ObjectId()
+            };
+        }
+
         // Intentar buscar y actualizar, si no existe, crear (upsert)
         // El unique index es en {miembro, ciclo, tipoCredito}.
         const creditoGuardado = await Credito.findOneAndUpdate(
-            { miembro: query.miembro, ciclo: query.ciclo, tipoCredito: query.tipoCredito },
-            { $set: dataToSave },
+            query,
+            updateDoc,
             { upsert: true, new: true, runValidators: true }
         );
 
