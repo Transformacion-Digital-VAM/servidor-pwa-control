@@ -12,7 +12,7 @@ router.get('/get/:id', verifyToken, grupoController.getGrupoById); //verifyToken
 // obtener grupos por coordinacion
 router.get('/get/coordinacion/:coordinacion', verifyToken, grupoController.getGruposPorCoordinacion); //verifyToken
 // obtener grupos por asesor
-router.get('/get/asesor/:asesor', verifyToken, grupoController.getGruposPorAsesor); //verifyToken
+router.get('/get/asesor/:asesor', grupoController.getGruposPorAsesor); //verifyToken
 router.put('/update/:id', verifyToken, grupoController.updateGrupo); //verifyToken
 router.delete('/delete/:id', verifyToken, grupoController.deleteGrupo); //verifyToken
 

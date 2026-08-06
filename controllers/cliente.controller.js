@@ -1,4 +1,5 @@
 const Cliente = require('../models/Cliente');
+const Usuario = require('../models/User');
 
 exports.createCliente = async (req, res) => {
     try {
@@ -63,3 +64,34 @@ exports.deleteCliente = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 }
+
+
+exports.getClientesMaster = async (req, res) => {
+    try {
+
+        // Obtener los ids de los usuarios master
+        const masters = await Usuario.find(
+            { role: 'master' },
+            '_id'
+        );
+
+        const idsMasters = masters.map(master => master._id);
+
+        // Buscar clientes cuyo asesor sea un master
+        const clientes = await Cliente.find({
+            asesor: { $in: idsMasters }
+        }).populate('asesor', 'nombre username');
+
+        res.status(200).json({
+            success: true,
+            data: clientes
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
