@@ -146,12 +146,13 @@ exports.getCicloSemanaGrupo = async (req, res) => {
 
         // Tomar el primer integrante
         const primerMiembro = grupo.integrantes[0];
+        const primerMiembroId = primerMiembro._id || primerMiembro;
 
-        // Buscar el crédito activo del primer integrante
+        // Buscar el crédito activo más reciente del primer integrante
         const credito = await Credito.findOne({
-            miembro: primerMiembro,
+            miembro: primerMiembroId,
             estado: 'Activo'
-        }).sort({ ciclo: -1 });
+        }).sort({ ciclo: -1, createdAt: -1 });
 
         if (!credito) {
             return res.status(404).json({

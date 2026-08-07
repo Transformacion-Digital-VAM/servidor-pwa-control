@@ -131,7 +131,12 @@ exports.crearCredito = async (req, res) => {
 exports.obtenerCreditos = async (req, res) => {
     try {
         const creditos = await Credito.find()
-            .populate('miembro');
+            .populate({
+                path: 'miembro',
+                populate: { path: 'grupo' }
+            })
+            .populate('cliente')
+            .sort({ ciclo: -1, createdAt: -1 });
 
         const hoy = new Date();
         const operacionesBulk = [];
@@ -176,7 +181,11 @@ exports.obtenerCreditoPorId = async (req, res) => {
         const { id } = req.params;
 
         const credito = await Credito.findById(id)
-            .populate('miembro');
+            .populate({
+                path: 'miembro',
+                populate: { path: 'grupo' }
+            })
+            .populate('cliente');
 
         if (!credito) {
             return res.status(404).json({
