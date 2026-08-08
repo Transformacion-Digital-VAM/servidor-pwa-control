@@ -5,6 +5,7 @@ const { verifyToken } = require('../middlewares/auth.middleware');
 
 
 router.get('/clientes-master', clienteController.getClientesMaster);
+router.get('/miembros-grupo-con-individual', clienteController.getMiembrosGrupoConCreditoIndividual);
 router.post('/', verifyToken, clienteController.createCliente); //verifyToken
 router.get('/', verifyToken, clienteController.getCliente); //verifyToken
 router.get('/:id', verifyToken, clienteController.getClientePorId); //verifyToken
