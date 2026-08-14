@@ -38,6 +38,9 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+const { requestLoggerMiddleware } = require('./utils/loggers');
+app.use(requestLoggerMiddleware);
+
 // Rutas
 app.use('/api/users', userRoutes);
 app.use('/api/grupos', grupoRoutes);

@@ -1,7 +1,7 @@
 const Credito = require('../models/Credito');
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
-
+const { logAccion, logWarn, logError } = require('../utils/loggers');
 
 /** 
  * CRUD DE CREDITOS
@@ -31,6 +31,7 @@ exports.crearCredito = async (req, res) => {
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
             if (!cliente) {
+                logWarn(req, 'CREAR_CREDITO_VALIDACION_FALLIDA', 'Crédito Individual requiere cliente', { body: req.body });
                 return res.status(400).json({ ok: false, msg: 'Para un crédito Individual debe seleccionar un Cliente' });
             }
             // Limpiar miembro
@@ -38,6 +39,7 @@ exports.crearCredito = async (req, res) => {
         } else {
             // Si es CC, R o 8S (Grupales)
             if (!miembro) {
+                logWarn(req, 'CREAR_CREDITO_VALIDACION_FALLIDA', 'Crédito Grupal requiere miembro', { body: req.body });
                 return res.status(400).json({ ok: false, msg: 'Para este tipo de crédito debe seleccionar un Miembro del grupo' });
             }
             // Limpiar cliente
@@ -110,13 +112,19 @@ exports.crearCredito = async (req, res) => {
             { upsert: true, new: true, runValidators: true }
         );
 
+        logAccion(req, 'GUARDAR_CREDITO', {
+            descripcion: `Crédito ${tipoCredito} (Ciclo ${ciclo}) guardado/actualizado para ${tipoCredito === 'Individual' ? 'Cliente ' + cliente : 'Miembro ' + miembro} - Monto: $${montoSolicitado}`,
+            datos: { tipoCredito, ciclo, miembro, cliente, montoSolicitado, pagoPactado: pagoPactadoCalc, saldoTotal: saldoTotalCalc },
+            resultado: { creditoId: creditoGuardado._id, estado: creditoGuardado.estado, saldoPendiente: creditoGuardado.saldoPendiente }
+        });
+
         res.status(201).json({
             ok: true,
             credito: creditoGuardado
         });
 
     } catch (error) {
-        console.error('Error en crearCredito:', error);
+        logError(req, 'CREAR_CREDITO_ERROR', error, { body: req.body });
         res.status(500).json({
             ok: false,
             msg: 'Error al crear o actualizar crédito',
@@ -124,8 +132,6 @@ exports.crearCredito = async (req, res) => {
         });
     }
 };
-
-
 
 // READ ALL
 exports.obtenerCreditos = async (req, res) => {
@@ -168,6 +174,7 @@ exports.obtenerCreditos = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'OBTENER_CREDITOS_ERROR', error);
         res.status(500).json({
             ok: false,
             msg: 'Error al obtener créditos'
@@ -188,6 +195,7 @@ exports.obtenerCreditoPorId = async (req, res) => {
             .populate('cliente');
 
         if (!credito) {
+            logWarn(req, 'OBTENER_CREDITO_NOT_FOUND', 'Crédito no encontrado por ID', { id });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
@@ -209,13 +217,13 @@ exports.obtenerCreditoPorId = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'OBTENER_CREDITO_POR_ID_ERROR', error, { id: req.params.id });
         res.status(500).json({
             ok: false,
             msg: 'Error al buscar crédito'
         });
     }
 };
-
 
 // UPDATE
 exports.actualizarCredito = async (req, res) => {
@@ -224,6 +232,7 @@ exports.actualizarCredito = async (req, res) => {
 
         const creditoOriginal = await Credito.findById(id);
         if (!creditoOriginal) {
+            logWarn(req, 'ACTUALIZAR_CREDITO_NOT_FOUND', 'Intento de actualizar crédito inexistente', { id, body: req.body });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
@@ -271,11 +280,18 @@ exports.actualizarCredito = async (req, res) => {
         );
 
         if (!creditoActualizado) {
+            logWarn(req, 'ACTUALIZAR_CREDITO_FALLIDO', 'No se pudo actualizar el crédito tras búsqueda', { id });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
         }
+
+        logAccion(req, 'ACTUALIZAR_CREDITO', {
+            descripcion: `Crédito actualizado (ID: ${id}) - Tipo: ${creditoActualizado.tipoCredito} | Monto: $${creditoActualizado.montoSolicitado}`,
+            datos: { id, cambios: datosActualizar, esRefill },
+            resultado: { creditoId: creditoActualizado._id, saldoPendiente: creditoActualizado.saldoPendiente, estado: creditoActualizado.estado }
+        });
 
         res.json({
             ok: true,
@@ -283,13 +299,13 @@ exports.actualizarCredito = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'ACTUALIZAR_CREDITO_ERROR', error, { id: req.params.id, body: req.body });
         res.status(500).json({
             ok: false,
             msg: 'Error al actualizar crédito'
         });
     }
 };
-
 
 // DELETE
 exports.eliminarCredito = async (req, res) => {
@@ -299,11 +315,23 @@ exports.eliminarCredito = async (req, res) => {
         const creditoEliminado = await Credito.findByIdAndDelete(id);
 
         if (!creditoEliminado) {
+            logWarn(req, 'ELIMINAR_CREDITO_NOT_FOUND', 'Intento de eliminar crédito inexistente', { id });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
         }
+
+        logAccion(req, 'ELIMINAR_CREDITO', {
+            descripcion: `Crédito eliminado (ID: ${id}) - Tipo: ${creditoEliminado.tipoCredito}, Ciclo: ${creditoEliminado.ciclo}`,
+            datos: { id },
+            resultado: {
+                creditoId: id,
+                miembro: creditoEliminado.miembro,
+                cliente: creditoEliminado.cliente,
+                saldoPendiente: creditoEliminado.saldoPendiente
+            }
+        });
 
         res.json({
             ok: true,
@@ -311,13 +339,13 @@ exports.eliminarCredito = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'ELIMINAR_CREDITO_ERROR', error, { id: req.params.id });
         res.status(500).json({
             ok: false,
             msg: 'Error al eliminar crédito'
         });
     }
 };
-
 
 // REGISTRAR PAGO
 exports.registrarPago = async (req, res) => {
@@ -346,6 +374,7 @@ exports.registrarPago = async (req, res) => {
         // 1. Obtener el crédito 
         const creditoOrigen = await Credito.findById(id);
         if (!creditoOrigen) {
+            logWarn(req, 'REGISTRAR_PAGO_ORIGEN_NOT_FOUND', 'Crédito de origen no encontrado para registrar pago', { id, body: req.body });
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
         }
 
@@ -373,9 +402,11 @@ exports.registrarPago = async (req, res) => {
         // --- MANEJO DE CRÉDITO INDIVIDUAL ---
         if (creditoOrigen.tipoCredito === 'Individual') {
             if (creditoOrigen.estado === 'Liquidado' && montoCreditoNum > 0) {
+                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_LIQUIDADO', 'Intento de abonar a crédito Individual ya liquidado', { creditoId: id, montoCreditoNum });
                 return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
             }
             if (sumaTotal <= 0) {
+                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_MONTO_CERO', 'Monto total ingresado es 0 o menor', { creditoId: id, body: req.body });
                 return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
             }
 
@@ -392,10 +423,17 @@ exports.registrarPago = async (req, res) => {
                 );
             });
             if (existeDuplicado) {
+                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_DUPLICADO', 'Pago duplicado detectado para crédito individual en la misma fecha', {
+                    creditoId: id,
+                    montoCredito: montoCreditoNum,
+                    fecha: fechaPagoObj.toISOString(),
+                    metodoPago
+                });
                 return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
             }
 
             const numeroPago = (creditoOrigen.pagos || []).length + 1;
+            const saldoAnterior = creditoOrigen.saldoPendiente;
             const nuevoPago = {
                 numeroPago,
                 montoPagado: montoCreditoNum,
@@ -452,6 +490,18 @@ exports.registrarPago = async (req, res) => {
 
             await creditoOrigen.save();
 
+            logAccion(req, 'REGISTRAR_PAGO_INDIVIDUAL', {
+                descripcion: `Pago Individual # ${numeroPago} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum})`,
+                datos: { creditoId: id, montoCreditoNum, montoAhorroNum, metodoPago, numeroRecibo },
+                resultado: {
+                    numeroPago,
+                    saldoAnterior,
+                    nuevoSaldo: creditoOrigen.saldoPendiente,
+                    estado: creditoOrigen.estado,
+                    totalPagosEnCredito: creditoOrigen.pagos.length
+                }
+            });
+
             return res.json({
                 ok: true,
                 msg: 'Pago registrado correctamente (Individual)',
@@ -460,9 +510,11 @@ exports.registrarPago = async (req, res) => {
         }
         // --- FIN DE MANEJO DE CRÉDITO INDIVIDUAL ---
 
-        // --- MANEJO DE MÚLTIPOS BENEFICIARIOS (APOYO SOLIDARIO) ---
+        // --- MANEJO DE MÚLTIPLES BENEFICIARIOS (APOYO SOLIDARIO) ---
         if (pagoSolidario && !recuperacionSolidario && Array.isArray(beneficiariosSolidarios)) {
             let totalSolidarioOtorgado = 0;
+            const detallesBeneficiariosAplicados = [];
+            const beneficiariosNoEncontrados = [];
 
             for (const item of beneficiariosSolidarios) {
                 const bId = item.miembro;
@@ -484,6 +536,7 @@ exports.registrarPago = async (req, res) => {
                         );
                     });
                     if (existeDuplicado) {
+                        logWarn(req, 'SOLIDARIO_MULTIPLE_DUPLICADO_OMITIDO', `Pago solidario duplicado omitido para miembro beneficiario ${bId}`, { bMonto, metodoPago });
                         continue; // Saltar este beneficiario duplicado
                     }
                     const numeroPagoB = (creditoDestino.pagos || []).length + 1;
@@ -527,6 +580,14 @@ exports.registrarPago = async (req, res) => {
                     }
                     await creditoDestino.save();
                     totalSolidarioOtorgado += bMonto;
+                    detallesBeneficiariosAplicados.push({ miembroId: bId, creditoDestinoId: creditoDestino._id, monto: bMonto });
+                } else {
+                    beneficiariosNoEncontrados.push({ miembroId: bId, monto: bMonto });
+                    logWarn(req, 'SOLIDARIO_BENEFICIARIO_SIN_CREDITO_ACTIVO', `No se encontró crédito Activo para miembro beneficiario ${bId}. No se abonó el monto solidario $${bMonto}`, {
+                        miembroId: bId,
+                        monto: bMonto,
+                        creditoOrigenId: id
+                    });
                 }
             }
 
@@ -576,6 +637,21 @@ exports.registrarPago = async (req, res) => {
             }
             await creditoOrigen.save();
 
+            logAccion(req, 'REGISTRAR_PAGO_SOLIDARIO_MULTIPLE', {
+                descripcion: `Apoyo solidario múltiple registrado desde crédito ${id}. Total otorgado: $${totalSolidarioOtorgado} a ${detallesBeneficiariosAplicados.length} beneficiario(s)`,
+                datos: {
+                    creditoOrigenId: id,
+                    beneficiariosEnviados: beneficiariosSolidarios,
+                    totalSolidarioOtorgado,
+                    montoAhorro: montoAhorroNum
+                },
+                resultado: {
+                    beneficiariosAplicados: detallesBeneficiariosAplicados,
+                    beneficiariosFallidos: beneficiariosNoEncontrados,
+                    creditoOrigenSaldo: creditoOrigen.saldoPendiente
+                }
+            });
+
             return res.json({
                 ok: true,
                 msg: 'Apoyos solidarios registrados correctamente',
@@ -588,6 +664,7 @@ exports.registrarPago = async (req, res) => {
         if (pagoSolidario && (montoSolidarioNum > 0 || beneficiarioFinal)) {
             // Caso Solidario: El dinero se abona al crédito del beneficiario
             if (!beneficiarioFinal) {
+                logWarn(req, 'REGISTRAR_PAGO_SOLIDARIO_SIN_BENEFICIARIO', 'Debe especificar el miembro beneficiario del solidario', { body: req.body });
                 return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro o beneficiario)' });
             }
 
@@ -595,6 +672,11 @@ exports.registrarPago = async (req, res) => {
             creditoDestino = await Credito.findOne({ miembro: beneficiarioFinal, estado: 'Activo' });
 
             if (!creditoDestino) {
+                logWarn(req, 'REGISTRAR_PAGO_SOLIDARIO_DESTINO_NOT_FOUND', `No se encontró crédito Activo para el beneficiario seleccionado: ${beneficiarioFinal}`, {
+                    beneficiario: beneficiarioFinal,
+                    montoSolidario: montoSolidarioNum,
+                    creditoOrigenId: id
+                });
                 return res.status(404).json({ ok: false, msg: 'No se encontró un crédito activo para el beneficiario seleccionado' });
             }
         } else {
@@ -603,17 +685,13 @@ exports.registrarPago = async (req, res) => {
         }
 
         // --- VALIDACIONES DE ESTADO Y MONTOS ---
-        // Se removieron las validaciones 400 de liquidado y excedente para evitar race conditions
-        // en pagos concurrentes (múltiples solidarios + pago normal). 
-        // El saldoPendiente se topará en 0 al final de la función si llega a bajar de 0.
-
         if (sumaTotal <= 0) {
+            logWarn(req, 'REGISTRAR_PAGO_MONTO_CERO', 'El pago total debe ser mayor a 0', { body: req.body });
             return res.status(400).json({ ok: false, msg: 'El pago total debe ser mayor a 0' });
         }
 
         // El abono al CRÉDITO se toma según si es solidario o no
         const abonoAlCredito = (pagoSolidario && !recuperacionSolidario) ? montoSolidarioNum : montoCreditoNum;
-
 
         // --- Validación de duplicado para pagos normales y solidarios ---
         const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
@@ -632,6 +710,13 @@ exports.registrarPago = async (req, res) => {
             );
         });
         if (existeDuplicado) {
+            logWarn(req, 'REGISTRAR_PAGO_DUPLICADO', 'Ya existe un pago igual registrado para este crédito en el mismo día', {
+                creditoDestinoId: creditoDestino._id,
+                montoPagado: montoCreditoNum,
+                montoSolidario: montoSolidarioNum,
+                fecha: fechaPagoObj.toISOString(),
+                metodoPago
+            });
             return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
         }
 
@@ -655,6 +740,7 @@ exports.registrarPago = async (req, res) => {
         // Calcular el historial del total pagado
         const totalHistorico = pagosDestino.reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
         const nuevoTotalPagado = totalHistorico + abonoAlCredito;
+        const saldoAnteriorDestino = creditoDestino.saldoPendiente;
 
         const nuevoPago = {
             numeroPago,
@@ -686,7 +772,7 @@ exports.registrarPago = async (req, res) => {
 
             // Solo asignar si es un apoyo a un TERCERO, no si es recuperación a uno mismo
             quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? creditoOrigen.miembro : undefined,
-            
+
             // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array de beneficiarios)
             // Si es recuperación, guardamos a quién le devolvió
             beneficiariosSolidarios: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && beneficiariosSolidarios ? beneficiariosSolidarios : undefined,
@@ -726,6 +812,29 @@ exports.registrarPago = async (req, res) => {
 
         await creditoDestino.save();
 
+        logAccion(req, 'REGISTRAR_PAGO', {
+            descripcion: `Pago #${numeroPago} registrado en Crédito ${creditoDestino._id} (Monto: $${montoCreditoNum}, Solidario: $${montoSolidarioNum}, Ahorro: $${montoAhorroNum})`,
+            datos: {
+                creditoDestinoId: creditoDestino._id,
+                creditoOrigenId: id,
+                pagoSolidario: !!pagoSolidario,
+                recuperacionSolidario: !!recuperacionSolidario,
+                montoPagado: montoCreditoNum,
+                montoSolidario: montoSolidarioNum,
+                montoAhorro: montoAhorroNum,
+                metodoPago,
+                numeroRecibo
+            },
+            resultado: {
+                numeroPago,
+                saldoAnterior: saldoAnteriorDestino,
+                nuevoSaldoPendiente: creditoDestino.saldoPendiente,
+                saldoSolidario: creditoDestino.saldoSolidario,
+                estado: creditoDestino.estado,
+                totalPagos: creditoDestino.pagos.length
+            }
+        });
+
         res.json({
             ok: true,
             msg: (pagoSolidario && !recuperacionSolidario) ? 'Apoyo solidario aplicado al beneficiario' : 'Pago registrado correctamente',
@@ -733,7 +842,7 @@ exports.registrarPago = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("ERROR DETALLADO EN REGISTRAR PAGO:", error);
+        logError(req, 'REGISTRAR_PAGO_ERROR', error, { creditoId: req.params.id, body: req.body });
         res.status(500).json({
             ok: false,
             msg: 'Error al registrar pago',
@@ -742,24 +851,23 @@ exports.registrarPago = async (req, res) => {
     }
 };
 
-
 // PAGOS CON UBICACIÓN (para el mapa del admin)
 exports.getPagosConUbicacion = async (req, res) => {
     try {
         const creditos = await Credito.find({
             'pagos.ubicacion.latitud': { $exists: true }
         })
-        .populate({
-            path: 'miembro',
-            select: 'nombre apellidos rol',
-            populate: {
-                path: 'grupo',
-                select: 'nombre clave asesor',
-                populate: { path: 'asesor', select: 'username nombre' }
-            }
-        })
-        .populate({ path: 'cliente', select: 'nombre' })
-        .lean();
+            .populate({
+                path: 'miembro',
+                select: 'nombre apellidos rol',
+                populate: {
+                    path: 'grupo',
+                    select: 'nombre clave asesor',
+                    populate: { path: 'asesor', select: 'username nombre' }
+                }
+            })
+            .populate({ path: 'cliente', select: 'nombre' })
+            .lean();
 
         const puntos = [];
 
@@ -807,7 +915,7 @@ exports.getPagosConUbicacion = async (req, res) => {
 
         res.json({ ok: true, total: puntos.length, puntos });
     } catch (error) {
-        console.error('Error en getPagosConUbicacion:', error);
+        logError(req, 'GET_PAGOS_CON_UBICACION_ERROR', error);
         res.status(500).json({ ok: false, msg: 'Error al obtener pagos con ubicación', error: error.message });
     }
 };
@@ -821,6 +929,7 @@ exports.registrarAbonoGarantia = async (req, res) => {
         const credito = await Credito.findById(id);
 
         if (!credito) {
+            logWarn(req, 'ABONO_GARANTIA_CREDITO_NOT_FOUND', 'Crédito no encontrado para abono de garantía', { id, body: req.body });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
@@ -828,6 +937,7 @@ exports.registrarAbonoGarantia = async (req, res) => {
         }
 
         if (monto <= 0) {
+            logWarn(req, 'ABONO_GARANTIA_MONTO_INVALIDO', 'El monto de garantía debe ser mayor a 0', { id, monto });
             return res.status(400).json({
                 ok: false,
                 msg: 'El monto debe ser mayor a 0'
@@ -835,12 +945,28 @@ exports.registrarAbonoGarantia = async (req, res) => {
         }
 
         // Agregar pago a la lista de garantía
+        if (!credito.garantia || typeof credito.garantia === 'number') {
+            const montoActual = typeof credito.garantia === 'number' ? credito.garantia : 0;
+            credito.garantia = {
+                montoCalculado: montoActual,
+                pagos: []
+            };
+        } else if (!credito.garantia.pagos) {
+            credito.garantia.pagos = [];
+        }
+
         credito.garantia.pagos.push({
             monto,
             fecha: fecha || new Date()
         });
 
         await credito.save();
+
+        logAccion(req, 'REGISTRAR_ABONO_GARANTIA', {
+            descripcion: `Abono a garantía de $${monto} registrado en Crédito ${id}`,
+            datos: { creditoId: id, monto, fecha },
+            resultado: { creditoId: id, totalPagosGarantia: credito.garantia.pagos.length }
+        });
 
         res.json({
             ok: true,
@@ -849,6 +975,7 @@ exports.registrarAbonoGarantia = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'REGISTRAR_ABONO_GARANTIA_ERROR', error, { creditoId: req.params.id, body: req.body });
         res.status(500).json({
             ok: false,
             msg: 'Error al registrar abono a garantía',
@@ -916,6 +1043,7 @@ exports.registrarAhorro = async (req, res) => {
         const credito = await Credito.findById(id);
 
         if (!credito) {
+            logWarn(req, 'REGISTRAR_AHORRO_NOT_FOUND', 'Crédito no encontrado para registrar ahorro', { id, body: req.body });
             return res.status(404).json({
                 ok: false,
                 msg: 'Crédito no encontrado'
@@ -923,10 +1051,18 @@ exports.registrarAhorro = async (req, res) => {
         }
 
         if (monto <= 0) {
+            logWarn(req, 'REGISTRAR_AHORRO_MONTO_INVALIDO', 'El monto de ahorro debe ser mayor a 0', { id, monto });
             return res.status(400).json({
                 ok: false,
                 msg: 'El monto debe ser mayor a 0'
             });
+        }
+
+        if (!credito.ahorro) {
+            credito.ahorro = { montoTotal: 0, pagosAhorro: [] };
+        }
+        if (!credito.ahorro.pagosAhorro) {
+            credito.ahorro.pagosAhorro = [];
         }
 
         // Agregar pago a la lista de ahorro
@@ -941,9 +1077,15 @@ exports.registrarAhorro = async (req, res) => {
         });
 
         // Actualizar el monto total sumando todos los pagos
-        credito.ahorro.montoTotal = credito.ahorro.pagosAhorro.reduce((total, p) => total + p.monto, 0);
+        credito.ahorro.montoTotal = credito.ahorro.pagosAhorro.reduce((total, p) => total + (p.monto || 0), 0);
 
         await credito.save();
+
+        logAccion(req, 'REGISTRAR_AHORRO', {
+            descripcion: `Ahorro de $${monto} registrado en Crédito ${id} (Nuevo total ahorro: $${credito.ahorro.montoTotal})`,
+            datos: { creditoId: id, monto, efectivo, transferencia, deposito, tarjeta, fecha },
+            resultado: { creditoId: id, nuevoMontoTotalAhorro: credito.ahorro.montoTotal, totalPagosAhorro: credito.ahorro.pagosAhorro.length }
+        });
 
         res.json({
             ok: true,
@@ -952,6 +1094,7 @@ exports.registrarAhorro = async (req, res) => {
         });
 
     } catch (error) {
+        logError(req, 'REGISTRAR_AHORRO_ERROR', error, { creditoId: req.params.id, body: req.body });
         res.status(500).json({
             ok: false,
             msg: 'Error al registrar ahorro',
@@ -959,100 +1102,3 @@ exports.registrarAhorro = async (req, res) => {
         });
     }
 };
-
-
-
-// REFILL / CONVERTIR A REFILL
-// exports.convertirARefill = async (req, res) => {
-//     try {
-//         const { id } = req.params; // ID del crédito viejo (CC o Individual)
-//         const {
-//             montoSolicitado,
-//             pagoPactado,
-//             semanas, // Si envían que va a ser a 16 semanas, etc.
-//             saldoTotal,
-//             tasaInteres
-//         } = req.body;
-
-//         // 1. Obtener crédito viejo
-//         const creditoViejo = await Credito.findById(id);
-
-//         if (!creditoViejo) {
-//             return res.status(404).json({ ok: false, msg: 'Crédito original no encontrado' });
-//         }
-
-//         if (creditoViejo.estado === 'Liquidado') {
-//             return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado, no se puede convertir a Refill' });
-//         }
-
-//         // 2. Calcular semana actual del viejo (momento en que se hace Refill)
-//         const semanaInicioRefill = req.body.semanaActual || calcularSemanaActual(creditoViejo.fechaPrimerPago, creditoViejo.frecuenciaPago, new Date());
-
-//         // 3. Variables calculadas para el Refill
-//         const numSemanas = semanas || 16;
-//         const pagoPactadoCalc = pagoPactado || (montoSolicitado / (numSemanas - parseInt(semanaInicioRefill) + 1));
-//         const saldoTotalCalc = saldoTotal || (pagoPactadoCalc * numSemanas);
-//         const garantiaCalculada = montoSolicitado * 0.10;
-
-//         // 4. Crear el nuevo crédito 'Refill' (R)
-//         const mongoose = require('mongoose');
-
-//         const nuevoCredito = new Credito({
-//             miembro: creditoViejo.miembro,
-//             cliente: creditoViejo.cliente,
-//             ciclo: creditoViejo.ciclo,
-//             tipoCredito: 'R', // Convertimos a Refill
-//             semanas: numSemanas,    // Mantenemos o cambiamos total de semanas (ej: 16)
-//             pagoPactado: pagoPactadoCalc,
-//             saldoTotal: saldoTotalCalc,
-//             saldoPendiente: saldoTotalCalc,
-//             garantia: garantiaCalculada, // Nueva garantia calculada al monto solicitado
-//             tasaInteres: tasaInteres || creditoViejo.tasaInteres,
-//             montoSolicitado,
-//             ahorro: {
-//                 montoTotal: creditoViejo.ahorro ? creditoViejo.ahorro.montoTotal : 0,
-//                 // Decidí heredar el total del ahorro. En pagosAhorro puedes heredarlo o dejarlo vacío
-//                 pagosAhorro: creditoViejo.ahorro ? creditoViejo.ahorro.pagosAhorro : []
-//             },
-//             fechaPrimerPago: creditoViejo.fechaPrimerPago, // Mantenemos la primera fecha histórica
-//             frecuenciaPago: creditoViejo.frecuenciaPago,
-//             garantiaPredial: creditoViejo.garantiaPredial,
-//             equivalenciaMeses: creditoViejo.equivalenciaMeses,
-//             grupoOpcional: creditoViejo.grupoOpcional,
-//             pagos: [], // Limpiamos pagos para que la nueva hoja inicie sin marcas de pagos Refill
-//             semanaActual: semanaInicioRefill // La semana en que inició este Refill
-//         });
-
-//         await nuevoCredito.save();
-
-//         // 5. Liquidamos el crédito viejo
-//         creditoViejo.estado = 'Liquidado';
-//         // Podrías poner también un saldoPendiente viejo = 0 si lo deseas,
-//         // pero liquidarlo suele ser suficiente para que ya no salga en cobros de Activo.
-//         // creditoViejo.saldoPendiente = 0;
-//         await creditoViejo.save();
-
-//         res.status(201).json({
-//             ok: true,
-//             msg: 'Crédito convertido a Refill correctamente',
-//             creditoAnterior: creditoViejo,
-//             nuevoCreditoRefill: nuevoCredito
-//         });
-
-//     } catch (error) {
-//         // En caso de que truene el unique index (miembro, ciclo, tipoCredito) por hacer 2 refills,
-//         // puedes manejarlo como un error particular aquí
-//         if (error.code === 11000) {
-//             return res.status(400).json({
-//                 ok: false,
-//                 msg: 'Ya existe un crédito Refill para este miembro en este ciclo.',
-//                 error: error.message
-//             });
-//         }
-//         res.status(500).json({
-//             ok: false,
-//             msg: 'Error al convertir a Refill',
-//             error: error.message
-//         });
-//     }
-// };

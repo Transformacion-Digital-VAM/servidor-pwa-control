@@ -1,0 +1,9 @@
+[2026-08-14 16:41:57.978] [ERROR] [Usuario: dani_test | Rol: asesor | ID: 654321 | IP: 192.168.1.50] [ACCION: TEST_ERROR] Error: Fallo simulado | DETALLES: {"detalle":"Error de prueba"} | STACK: Error: Fallo simulado
+    at [eval]:10:40
+    at runScriptInThisContext (node:internal/vm:219:10)
+    at node:internal/process/execution:451:12
+    at [eval]-wrapper:6:24
+    at runScriptInContext (node:internal/process/execution:449:60)
+    at evalFunction (node:internal/process/execution:283:30)
+    at evalTypeScript (node:internal/process/execution:295:3)
+    at node:internal/main/eval_string:71:3
