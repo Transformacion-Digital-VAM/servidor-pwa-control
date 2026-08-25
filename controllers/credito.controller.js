@@ -55,8 +55,19 @@ exports.crearCredito = async (req, res) => {
             numSemanas = semanas;
         }
 
-        // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a montoSolicitado / numSemanas
-        const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / numSemanas);
+        // Si viene pagoPactado en el body se utiliza; si es 8S y viene el pactado de 16s, se duplica para cubrir el total
+        let pagoPactadoCalc = req.body.pagoPactado;
+        if (!pagoPactadoCalc) {
+            const meses = req.body.equivalenciaMeses || 4;
+            const tasa = tasaInteres || 0;
+            const totalConInteres = montoSolicitado * (1 + (tasa * meses / 100));
+            pagoPactadoCalc = totalConInteres / numSemanas;
+        } else if (tipoCredito === '8S') {
+            // Si el pactado enviado es el de 16 semanas (ej. 900), para 8S debe ser el doble (1800)
+            if (pagoPactadoCalc * 8 < montoSolicitado) {
+                pagoPactadoCalc = pagoPactadoCalc * 2;
+            }
+        }
 
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
             ? req.body.saldoTotal
@@ -289,10 +300,18 @@ exports.actualizarCredito = async (req, res) => {
             if (datosActualizar.garantia === undefined) {
                 datosActualizar.garantia = montoSolicitado * (porc / 100);
             }
-            // Pago pactado a 8 semanas
-            const pactado8 = datosActualizar.pagoPactado || (montoSolicitado / 8);
+
+            let pactado8 = datosActualizar.pagoPactado || creditoOriginal.pagoPactado;
+            if (!pactado8) {
+                const meses = datosActualizar.equivalenciaMeses || creditoOriginal.equivalenciaMeses || 4;
+                const tasa = datosActualizar.tasaInteres || creditoOriginal.tasaInteres || 0;
+                const totalConInteres = montoSolicitado * (1 + (tasa * meses / 100));
+                pactado8 = totalConInteres / 8;
+            } else if (pactado8 * 8 < montoSolicitado) {
+                pactado8 = pactado8 * 2;
+            }
+
             datosActualizar.pagoPactado = pactado8;
-            // Saldo total calculado a 8 semanas
             const nuevoSaldoTotal = pactado8 * 8;
             datosActualizar.saldoTotal = nuevoSaldoTotal;
 
