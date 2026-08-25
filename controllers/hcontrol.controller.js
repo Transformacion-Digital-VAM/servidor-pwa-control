@@ -158,8 +158,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
         };
 
 
-        const tieneNormales = creditos.some(c => c.tipoCredito !== 'R');
-        const esSoloRefill = !tieneNormales && creditos.every(c => c.tipoCredito === 'R');
+        const esSoloRefill = creditos.length > 0 && creditos.every(c => c.tipoCredito === 'R');
+        const esSolo8S = creditos.length > 0 && creditos.every(c => c.tipoCredito === '8S');
+        const tiene16Semanas = creditos.some(c => c.tipoCredito === 'CC' || (c.tipoCredito !== 'R' && c.tipoCredito !== '8S') || (c.semanas && c.semanas >= 16));
 
         let maxSemanas = 16;
         let semanaInicioReal = 1;
@@ -179,13 +180,15 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 semanaInicioReal = inicioRefill;
             }
             maxSemanas = 8;
-        } else {
-            // Si hay créditos CC (o mixtos CC + Refill)
-            const creditoNormal = creditos.find(c => c.tipoCredito !== 'R') || creditos[0];
-            if (creditoNormal && creditoNormal.semanas) {
-                maxSemanas = creditoNormal.semanas;
-            }
+        } else if (esSolo8S) {
+            // Si absolutamente todos los créditos del grupo en este ciclo son 8S
             semanaInicioReal = 1;
+            maxSemanas = 8;
+        } else {
+            // Si hay créditos CC o combinaciones (CC + 8S, CC + R)
+            semanaInicioReal = 1;
+            const maxSem = Math.max(...creditos.map(c => (c.tipoCredito === 'CC' ? 16 : (c.semanas || 16))));
+            maxSemanas = maxSem > 0 ? maxSem : 16;
         }
 
         const templatePath = path.join(__dirname, '../templates/hojaControl.html');
@@ -201,7 +204,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const llena = req.query.llena === 'true';
         const sumasSemanalesMod = new Array(maxSemanas).fill(0);
 
-        const creditoBase = creditos.find(c => c.tipoCredito !== 'R') || creditos[0];
+        // Crédito base para fecha y frecuencia: priorizar CC o el que tenga 16 semanas
+        const creditoBase = creditos.find(c => c.tipoCredito === 'CC')
+            || creditos.find(c => (c.semanas || 16) >= 16)
+            || creditos.find(c => c.tipoCredito !== 'R')
+            || creditos[0];
+
         const fechaBasica = creditoBase?.fechaPrimerPago || creditos[0]?.fechaPrimerPago || new Date();
         const frecGrupo = (creditoBase && creditoBase.frecuenciaPago) ? creditoBase.frecuenciaPago.toLowerCase() : ((creditos[0] && creditos[0].frecuenciaPago) ? creditos[0].frecuenciaPago.toLowerCase() : 'semanal');
         const calendario = generarCalendario(fechaBasica, maxSemanas, semanaInicioReal, frecGrupo);
