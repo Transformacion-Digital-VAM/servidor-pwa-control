@@ -26,8 +26,7 @@ exports.crearCredito = async (req, res) => {
 
         const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
         const garantiaCalculada = garantia !== undefined ? garantia : (montoSolicitado * (porc / 100));
-        // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a /16
-        const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / 16);
+
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
             if (!cliente) {
@@ -55,6 +54,9 @@ exports.crearCredito = async (req, res) => {
         } else if (semanas) {
             numSemanas = semanas;
         }
+
+        // Si viene pagoPactado en el body se utiliza, de lo contrario fallback a montoSolicitado / numSemanas
+        const pagoPactadoCalc = req.body.pagoPactado || (montoSolicitado / numSemanas);
 
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
             ? req.body.saldoTotal
@@ -283,15 +285,15 @@ exports.actualizarCredito = async (req, res) => {
                 : (creditoOriginal.porcentajeGarantia !== undefined ? creditoOriginal.porcentajeGarantia : 10);
 
             datosActualizar.semanas = 8;
-            // Garantía sobre el monto solicitado total (igual que a 16 semanas)
+            // Garantía sobre el monto solicitado
             if (datosActualizar.garantia === undefined) {
                 datosActualizar.garantia = montoSolicitado * (porc / 100);
             }
-            // Pago pactado como si fuera a 16 semanas
-            const pactado16 = datosActualizar.pagoPactado || (montoSolicitado / 16);
-            datosActualizar.pagoPactado = pactado16;
+            // Pago pactado a 8 semanas
+            const pactado8 = datosActualizar.pagoPactado || (montoSolicitado / 8);
+            datosActualizar.pagoPactado = pactado8;
             // Saldo total calculado a 8 semanas
-            const nuevoSaldoTotal = pactado16 * 8;
+            const nuevoSaldoTotal = pactado8 * 8;
             datosActualizar.saldoTotal = nuevoSaldoTotal;
 
             const totalPagado = (creditoOriginal.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0);
