@@ -158,14 +158,35 @@ exports.generarHojaControlGrupal = async (req, res) => {
         };
 
 
-        const creditosNormales = creditos.filter(c => c.tipoCredito !== 'R' && c.tipoCredito !== 'MAGICO');
-        const creditosRefill = creditos.filter(c => c.tipoCredito === 'R');
-        const creditosMagico = creditos.filter(c => c.tipoCredito === 'MAGICO');
+        const tieneNormales = creditos.some(c => c.tipoCredito !== 'R');
+        const esSoloRefill = !tieneNormales && creditos.every(c => c.tipoCredito === 'R');
 
-        let gruposCreditos = [];
-        if (creditosNormales.length > 0) gruposCreditos.push(creditosNormales);
-        if (creditosRefill.length > 0) gruposCreditos.push(creditosRefill);
-        if (creditosMagico.length > 0) gruposCreditos.push(creditosMagico);
+        let maxSemanas = 16;
+        let semanaInicioReal = 1;
+
+        if (req.query.semanaInicio) {
+            semanaInicioReal = parseInt(req.query.semanaInicio);
+            maxSemanas = 8;
+        } else if (esSoloRefill) {
+            // Si todos los créditos del grupo en este ciclo son Refill
+            if (req.query.semanaInicioRefil) {
+                semanaInicioReal = parseInt(req.query.semanaInicioRefil);
+            } else {
+                let inicioRefill = 9;
+                if (creditos[0] && creditos[0].pagos && creditos[0].pagos.length > 0) {
+                    inicioRefill = creditos[0].pagos[0].numeroPago || 9;
+                }
+                semanaInicioReal = inicioRefill;
+            }
+            maxSemanas = 8;
+        } else {
+            // Si hay créditos CC (o mixtos CC + Refill)
+            const creditoNormal = creditos.find(c => c.tipoCredito !== 'R') || creditos[0];
+            if (creditoNormal && creditoNormal.semanas) {
+                maxSemanas = creditoNormal.semanas;
+            }
+            semanaInicioReal = 1;
+        }
 
         const templatePath = path.join(__dirname, '../templates/hojaControl.html');
         let htmlCompletoOrigin = fs.readFileSync(templatePath, 'utf8');
@@ -173,459 +194,423 @@ exports.generarHojaControlGrupal = async (req, res) => {
         let bodyMatch = htmlCompletoOrigin.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
         let bodyTemplate = bodyMatch ? bodyMatch[1] : '';
 
-        let finalBodies = [];
+        // 4. GENERAR TABLA PRINCIPAL (control de pagos)
+        let sumaPagoPactado = 0;
+        let sumaSaldoTotal = 0;
 
-        for (let sub = 0; sub < gruposCreditos.length; sub++) {
-            const creditosSubGrupo = gruposCreditos[sub];
+        const llena = req.query.llena === 'true';
+        const sumasSemanalesMod = new Array(maxSemanas).fill(0);
 
-            // 4. GENERAR TABLA PRINCIPAL (control de pagos)
-            let sumaPagoPactado = 0;
-            let sumaSaldoTotal = 0;
-            let maxSemanas = 16;
-            if (creditosSubGrupo.length > 0 && creditosSubGrupo[0].semanas) {
-                maxSemanas = creditosSubGrupo[0].semanas;
-            }
+        const creditoBase = creditos.find(c => c.tipoCredito !== 'R') || creditos[0];
+        const fechaBasica = creditoBase?.fechaPrimerPago || creditos[0]?.fechaPrimerPago || new Date();
+        const frecGrupo = (creditoBase && creditoBase.frecuenciaPago) ? creditoBase.frecuenciaPago.toLowerCase() : ((creditos[0] && creditos[0].frecuenciaPago) ? creditos[0].frecuenciaPago.toLowerCase() : 'semanal');
+        const calendario = generarCalendario(fechaBasica, maxSemanas, semanaInicioReal, frecGrupo);
 
-            const esRefill = creditosSubGrupo.length > 0 && creditosSubGrupo[0].tipoCredito === 'R';
+        let tablaThead = `<tr>
+        <th rowspan="2" width="2%">NO.</th>
+        <th rowspan="2" width="4%" style="font-size:9px;">TIPO DE<br>CRÉDITO</th>
+        <th rowspan="2" width="14%">NOMBRE DEL<br>CLIENTE</th>
+        <th rowspan="2" width="7%">PAGO<br>PACTADO</th>`;
 
-            let semanaInicioReal = 1;
-            if (req.query.semanaInicio) {
-                semanaInicioReal = parseInt(req.query.semanaInicio);
-                maxSemanas = 8;
-            } else if (esRefill) {
-                // Prioridad 1: Query param enviado desde el front (Admin o PWA)
-                if (req.query.semanaInicioRefil) {
-                    semanaInicioReal = parseInt(req.query.semanaInicioRefil);
-                } else {
-                    // Fallback: Buscar si hay algún pago para saber en qué semana inició originalmente
-                    let inicioRefill = 9;
-                    if (creditosSubGrupo[0] && creditosSubGrupo[0].pagos && creditosSubGrupo[0].pagos.length > 0) {
-                        // Si hay pagos anteriores, buscar el primero de ESTE ciclo? 
-                        // En realidad, para Refill solemos querer la parte alta (9-16)
-                        inicioRefill = creditosSubGrupo[0].pagos[0].numeroPago || 9;
-                    }
-                    semanaInicioReal = inicioRefill;
-                }
+        calendario.forEach(p => {
+            tablaThead += `<th width="4%" style="font-size:9px;">SEM ${p.numero}</th>`;
+        });
+        tablaThead += `<th rowspan="2" width="4%">S.F.</th></tr><tr>`;
+        calendario.forEach(p => {
+            tablaThead += `<th style="font-size: 8px;">${p.fecha}</th>`;
+        });
+        tablaThead += `</tr>`;
 
-                // Un Refill siempre durará 8 semanas (ej. 9-16, 17-24)
-                maxSemanas = 8;
-            }
+        let tablaTbody = '';
 
-            const llena = req.query.llena === 'true';
-            const sumasSemanalesMod = new Array(maxSemanas).fill(0);
+        creditos.forEach((credito, index) => {
+            const nombreCliente = credito.cliente
+                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                : credito.miembro
+                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                    : "N/A";
 
-            const fechaBasica = creditosSubGrupo.length > 0 ? creditosSubGrupo[0].fechaPrimerPago : new Date();
-            const frecGrupo = (creditosSubGrupo.length > 0 && creditosSubGrupo[0].frecuenciaPago) ? creditosSubGrupo[0].frecuenciaPago.toLowerCase() : 'semanal';
-            const calendario = generarCalendario(fechaBasica, maxSemanas, semanaInicioReal, frecGrupo);
+            const tipoCredito = credito.tipoCredito || "C.C.";
+            const pagoPactado = credito.pagoPactado || 0;
+            const saldoTotal = credito.saldoTotal || 0;
 
-            let tablaThead = `<tr>
-            <th rowspan="2" width="2%">NO.</th>
-            <th rowspan="2" width="4%" style="font-size:9px;">TIPO DE<br>CRÉDITO</th>
-            <th rowspan="2" width="14%">NOMBRE DEL<br>CLIENTE</th>
-            <th rowspan="2" width="7%">PAGO<br>PACTADO</th>`;
+            sumaPagoPactado += pagoPactado;
+            sumaSaldoTotal += saldoTotal;
 
-            calendario.forEach(p => {
-                tablaThead += `<th width="4%" style="font-size:9px;">SEM ${p.numero}</th>`;
-            });
-            tablaThead += `<th rowspan="2" width="4%">S.F.</th></tr><tr>`;
-            calendario.forEach(p => {
-                tablaThead += `<th style="font-size: 8px;">${p.fecha}</th>`;
-            });
-            tablaThead += `</tr>`;
-
-            let tablaTbody = '';
-
-            creditosSubGrupo.forEach((credito, index) => {
-                const nombreCliente = credito.cliente
-                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                    : credito.miembro
-                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                        : "N/A";
-
-                const tipoCredito = credito.tipoCredito || "C.C.";
-                const pagoPactado = credito.pagoPactado || 0;
-                const saldoTotal = credito.saldoTotal || 0;
-
-                sumaPagoPactado += pagoPactado;
-                sumaSaldoTotal += saldoTotal;
-
-                // Fila A del miembro (Nombre y Pago)
-                tablaTbody += `
-                <tr>
-                    <td rowspan="2" align="center" style="font-weight:bold;">${index + 1}</td>
-                    <td align="center" style="font-size:9px; font-weight:bold;">${tipoCredito}</td>
-                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
-                    <td rowspan="2" style="font-size:11px;">
-                        <div style="display: flex; justify-content: space-between; width: 100%;">
-                            <span>$</span>
-                            <span>${formatoMoneda(pagoPactado)}</span>
-                        </div>
-                    </td>
-            `;
-                for (let w = 0; w < maxSemanas; w++) {
-                    let valorCelda = '';
-                    let tdBgStyle = '';
-                    if (llena && credito.pagos) {
-                        // El calendario.numero representa la semana real (ej. 9, 10...)
-                        const semanaNumeroActual = calendario[w].numero;
-                        // Agrupar todos los pagos de esa misma semana
-                        const pagosSemana = credito.pagos.filter(p => p.numeroPago === semanaNumeroActual);
-
-                        if (pagosSemana.length > 0) {
-                            const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => {
-                                let monto = p.montoPagado || 0;
-                                // Agregar montoSolidario solo si fue RECIBIDO (no si fue otorgado)
-                                // Si quienPrestoSolidario es diferente al miembro actual, significa que fue beneficiario
-                                if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
-                                    const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
-                                    const miembroId = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
-                                    if (prestoId !== miembroId) {
-                                        monto += p.montoSolidario || 0;
-                                    }
-                                }
-                                return acc + monto;
-                            }, 0);
-                            // Verificar si hay solidarios RECIBIDOS (solo para colorear el fondo)
-                            const miembroIdStr = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
-                            const tieneSolidario = pagosSemana.some(p => {
-                                if (p.pagoSolidario !== true || !p.quienPrestoSolidario) return false;
-                                const prestoIdStr = p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
-                                return prestoIdStr !== miembroIdStr;
-                            });
-                            
-                            // Usar la fecha del primer pago de esa semana
-                            const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
-                            fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
-                            fechaSemanaObj.setHours(0, 0, 0, 0);
-
-                            const fechaProgramadaObj = new Date(calendario[w].fechaObj);
-                            fechaProgramadaObj.setHours(0, 0, 0, 0);
-
-                            const estaAtrasado = pagosSemana.some(pago => {
-                                const fechaPago = new Date(pago.fechaPago);
-                                fechaPago.setMinutes(fechaPago.getMinutes() + fechaPago.getTimezoneOffset());
-                                fechaPago.setHours(0, 0, 0, 0);
-                                return fechaPago > fechaProgramadaObj;
-                            });
-
-                            const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
-                            tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
-                            
-
-                            let valorCelda2 = '';
-                            if (montoPagoNormalSemana > 0) {
-                                const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
-                                const textoMonto = pagosSemana.some(p => p.pagoSolidario === true)
-                                    ? `${formatoMoneda(montoPagoNormalSemana)} / SOL`
-                                    : formatoMoneda(montoPagoNormalSemana);
-                                valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                            <span style="font-size: 7px; color: #666;">${fechaFormato}</span>
-                                            <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${textoMonto}</span>
-                                          </div>`;
-                            }
-
-                            sumasSemanalesMod[w] += montoPagoNormalSemana;
-                        }
-                    }
-                    tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}; ">${valorCelda}</td>`;
-                }
-                let sfVal = '';
-                if (llena) sfVal = `${formatoMoneda(credito.saldoPendiente)}`;
-                tablaTbody += `<td rowspan="2" align="center" style="font-size:10px; font-weight:bold;">${sfVal}</td></tr>`;
-
-                // Fila B del miembro (S.T. / Saldo)
-                tablaTbody += `
-                <tr>
-                    <td align="center" style="font-size:9px; font-weight:bold;">S.T.</td>
-                    <td style="font-size: 11px; padding: 0 5px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                            <span>$</span>
-                            <span>${formatoMoneda(saldoTotal)}</span>
-                        </div>
-                    </td>
-                </tr>
-            `;
-            });
-
-            // Totales - P.P.G.
+            // Fila A del miembro (Nombre y Pago)
             tablaTbody += `
             <tr>
-                <td colspan="3" align="center" style="font-weight:bold; font-size:11px; padding: 6px 0;">P.P.G.</td>
-                <td style="font-weight:bold; font-size:11px;">
-                    <div style="display:flex; justify-content:space-between; width:100%;">
-                        <span>$</span><span>${formatoMoneda(sumaPagoPactado)}</span>
+                <td rowspan="2" align="center" style="font-weight:bold;">${index + 1}</td>
+                <td align="center" style="font-size:9px; font-weight:bold;">${tipoCredito}</td>
+                <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
+                <td rowspan="2" style="font-size:11px;">
+                    <div style="display: flex; justify-content: space-between; width: 100%;">
+                        <span>$</span>
+                        <span>${formatoMoneda(pagoPactado)}</span>
                     </div>
                 </td>
         `;
             for (let w = 0; w < maxSemanas; w++) {
-                let val = llena && sumasSemanalesMod[w] > 0 ? `${formatoMoneda(sumasSemanalesMod[w])}` : '';
-                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
-            }
-            let sfTotal = llena ? `${formatoMoneda(sumaSaldoTotal - sumasSemanalesMod.reduce((a, b) => a + b, 0))}` : '';
-            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px; color: #b91c1c;">${sfTotal}</td></tr>`;
+                let valorCelda = '';
+                let tdBgStyle = '';
+                if (llena && credito.pagos) {
+                    // El calendario.numero representa la semana real (ej. 9, 10...)
+                    const semanaNumeroActual = calendario[w].numero;
+                    // Agrupar todos los pagos de esa misma semana
+                    const pagosSemana = credito.pagos.filter(p => p.numeroPago === semanaNumeroActual);
 
-            // S.I. / S.S.
-            tablaTbody += `
-            <tr>
-                <td colspan="4" align="center" style="font-weight:bold; font-size:11px;">S.I.</td>
-        `;
-            for (let w = 0; w < maxSemanas; w++) {
-                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">S.S.</td>`;
-            }
-            tablaTbody += `<td align="center" style="font-weight:bold; font-size:11px;">S.F.</td></tr>`;
-
-            // Fila Símbolo Pesos Final y Monto (Saldo Decreciente)
-            tablaTbody += `
-            <tr>
-                <td colspan="4" align="right" style="font-weight:bold; font-size:12px; padding-right:10px;"><span>$</span>${formatoMoneda(sumaSaldoTotal)}</td>
-        `;
-            let saldoAcumulado = sumaSaldoTotal;
-            for (let w = 0; w < maxSemanas; w++) {
-                saldoAcumulado -= sumasSemanalesMod[w];
-                let val = (llena && sumasSemanalesMod[w] > 0) ? `${formatoMoneda(saldoAcumulado)}` : '';
-                tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
-            }
-            tablaTbody += `<td></td></tr>`;
-
-            // Obtener datos del grupo del primer credito para la cabecera
-            const unCredito = creditosSubGrupo[0];
-            const grupo = unCredito?.miembro?.grupo;
-            const grupoNombre = grupo?.nombre || "INDIVIDUAL";
-            const diaVisita = grupo?.diaVisita || "________________";
-            const horaVisita = grupo?.horaVisita || "________________";        // TABLA 2: INCREMENTO DE GARANTÍA
-            let tablaIncrementoThead = `
-            <tr>
-                <th colspan="${4 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">INCREMENTO DE GTIA.</th>
-            </tr>
-            <tr>
-                <th width="2%">NO.</th>
-                <th width="8%">CARGO</th>
-                <th width="10%">GARANTIA<br>INICIAL</th>
-                <th width="14%">NOMBRE DEL CLIENTE</th>`;
-            for (let w = 1; w <= maxSemanas; w++) {
-                const lbl = semanaInicioReal + w - 1;
-                tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
-            }
-            tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
-
-            let tablaIncrementoTbody = '';
-            let sumaGarantiaInicial = 0;
-            // Sumas por semana para incremento de garantía
-            const sumIncrementoSemanas = new Array(maxSemanas).fill(0);
-            let sumaGarantiaFinalTotal = 0;
-            creditosSubGrupo.forEach((credito, index) => {
-                const nombreCliente = credito.cliente
-                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                    : credito.miembro
-                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                        : "N/A";
-
-                let cargo = "INTEGRANTE";
-                if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
-
-                const garantiaInicial = credito.garantia || 0;
-                sumaGarantiaInicial += garantiaInicial;
-
-                tablaIncrementoTbody += `
-                <tr>
-                    <td align="center" style="font-weight:bold;">${index + 1}</td>
-                    <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
-                    <td align="center" style="font-size:11px;">$ ${formatoMoneda(garantiaInicial)}</td>
-                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
-            `;
-                for (let w = 1; w <= maxSemanas; w++) {
-                    let label = semanaInicioReal + w - 1;
-                    let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                    let valorCelda = '';
-                    if (llena) {
-                        let montoSemana = 0;
-                        // 1. Prioridad: Buscar en historial de pagos (ahorro capturado junto con el pago semanal)
-                        if (credito.pagos && credito.pagos.length > 0) {
-                            const pSemana = credito.pagos.find(p => p.numeroPago == label);
-                            if (pSemana && pSemana.montoAhorro > 0) {
-                                montoSemana = pSemana.montoAhorro;
+                    if (pagosSemana.length > 0) {
+                        const montoPagoNormalSemana = pagosSemana.reduce((acc, p) => {
+                            let monto = p.montoPagado || 0;
+                            // Agregar montoSolidario solo si fue RECIBIDO (no si fue otorgado)
+                            // Si quienPrestoSolidario es diferente al miembro actual, significa que fue beneficiario
+                            if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
+                                const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                                const miembroId = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
+                                if (prestoId !== miembroId) {
+                                    monto += p.montoSolidario || 0;
+                                }
                             }
+                            return acc + monto;
+                        }, 0);
+                        // Verificar si hay solidarios RECIBIDOS (solo para colorear el fondo)
+                        const miembroIdStr = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
+                        const tieneSolidario = pagosSemana.some(p => {
+                            if (p.pagoSolidario !== true || !p.quienPrestoSolidario) return false;
+                            const prestoIdStr = p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                            return prestoIdStr !== miembroIdStr;
+                        });
+                        
+                        // Usar la fecha del primer pago de esa semana
+                        const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
+                        fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
+                        fechaSemanaObj.setHours(0, 0, 0, 0);
+
+                        const fechaProgramadaObj = new Date(calendario[w].fechaObj);
+                        fechaProgramadaObj.setHours(0, 0, 0, 0);
+
+                        const estaAtrasado = pagosSemana.some(pago => {
+                            const fechaPago = new Date(pago.fechaPago);
+                            fechaPago.setMinutes(fechaPago.getMinutes() + fechaPago.getTimezoneOffset());
+                            fechaPago.setHours(0, 0, 0, 0);
+                            return fechaPago > fechaProgramadaObj;
+                        });
+
+                        const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
+                        tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
+                        
+
+                        let valorCelda2 = '';
+                        if (montoPagoNormalSemana > 0) {
+                            const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
+                            const textoMonto = pagosSemana.some(p => p.pagoSolidario === true)
+                                ? `${formatoMoneda(montoPagoNormalSemana)} / SOL`
+                                : formatoMoneda(montoPagoNormalSemana);
+                            valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                                        <span style="font-size: 7px; color: #666;">${fechaFormato}</span>
+                                        <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${textoMonto}</span>
+                                      </div>`;
                         }
 
-                        // 2. Fallback: Buscar en pagosAhorro independientes
-                        if (montoSemana === 0 && credito.ahorro && credito.ahorro.pagosAhorro && credito.ahorro.pagosAhorro.length > 0) {
-                            const ahorro = credito.ahorro.pagosAhorro[w - 1];
-                            if (ahorro && ahorro.monto > 0) {
-                                montoSemana = ahorro.monto;
-                            }
-                        }
-
-                        if (montoSemana > 0) {
-                            valorCelda = `${formatoMoneda(montoSemana)}`;
-                            // Acumular en totales por semana
-                            sumIncrementoSemanas[w - 1] += montoSemana;
-                        }
+                        sumasSemanalesMod[w] += montoPagoNormalSemana;
                     }
-                    tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold;">${valorCelda}</td>`;
                 }
+                tablaTbody += `<td rowspan="2" align="center" style="vertical-align: middle; padding:0; ${tdBgStyle}; ">${valorCelda}</td>`;
+            }
+            let sfVal = '';
+            if (llena) sfVal = `${formatoMoneda(credito.saldoPendiente)}`;
+            tablaTbody += `<td rowspan="2" align="center" style="font-size:10px; font-weight:bold;">${sfVal}</td></tr>`;
 
-                let totalAhorro = 0;
-                if (llena && credito.ahorro) {
-                    totalAhorro += (credito.ahorro.montoTotal || 0);
-                }
-                // Acumular garantía final total
-                sumaGarantiaFinalTotal += (llena ? totalAhorro : 0);
-                let finalVal = llena ? `${formatoMoneda(totalAhorro)}` : '$ ';
-                tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
-            });
+            // Fila B del miembro (S.T. / Saldo)
+            tablaTbody += `
+            <tr>
+                <td align="center" style="font-size:9px; font-weight:bold;">S.T.</td>
+                <td style="font-size: 11px; padding: 0 5px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <span>$</span>
+                        <span>${formatoMoneda(saldoTotal)}</span>
+                    </div>
+                </td>
+            </tr>
+        `;
+        });
 
-            // Total Incremento
+        // Totales - P.P.G.
+        tablaTbody += `
+        <tr>
+            <td colspan="3" align="center" style="font-weight:bold; font-size:11px; padding: 6px 0;">P.P.G.</td>
+            <td style="font-weight:bold; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; width:100%;">
+                    <span>$</span><span>${formatoMoneda(sumaPagoPactado)}</span>
+                </div>
+            </td>
+    `;
+        for (let w = 0; w < maxSemanas; w++) {
+            let val = llena && sumasSemanalesMod[w] > 0 ? `${formatoMoneda(sumasSemanalesMod[w])}` : '';
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
+        }
+        let sfTotal = llena ? `${formatoMoneda(sumaSaldoTotal - sumasSemanalesMod.reduce((a, b) => a + b, 0))}` : '';
+        tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px; color: #b91c1c;">${sfTotal}</td></tr>`;
+
+        // S.I. / S.S.
+        tablaTbody += `
+        <tr>
+            <td colspan="4" align="center" style="font-weight:bold; font-size:11px;">S.I.</td>
+    `;
+        for (let w = 0; w < maxSemanas; w++) {
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">S.S.</td>`;
+        }
+        tablaTbody += `<td align="center" style="font-weight:bold; font-size:11px;">S.F.</td></tr>`;
+
+        // Fila Símbolo Pesos Final y Monto (Saldo Decreciente)
+        tablaTbody += `
+        <tr>
+            <td colspan="4" align="right" style="font-weight:bold; font-size:12px; padding-right:10px;"><span>$</span>${formatoMoneda(sumaSaldoTotal)}</td>
+    `;
+        let saldoAcumulado = sumaSaldoTotal;
+        for (let w = 0; w < maxSemanas; w++) {
+            saldoAcumulado -= sumasSemanalesMod[w];
+            let val = (llena && sumasSemanalesMod[w] > 0) ? `${formatoMoneda(saldoAcumulado)}` : '';
+            tablaTbody += `<td align="center" style="font-weight:bold; font-size:10px;">${val}</td>`;
+        }
+        tablaTbody += `<td></td></tr>`;
+
+        // Obtener datos del grupo del primer credito para la cabecera
+        const unCredito = creditos[0];
+        const grupo = unCredito?.miembro?.grupo;
+        const grupoNombre = grupo?.nombre || "INDIVIDUAL";
+        const diaVisita = grupo?.diaVisita || "________________";
+        const horaVisita = grupo?.horaVisita || "________________";
+
+        // TABLA 2: INCREMENTO DE GARANTÍA
+        let tablaIncrementoThead = `
+        <tr>
+            <th colspan="${4 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">INCREMENTO DE GTIA.</th>
+        </tr>
+        <tr>
+            <th width="2%">NO.</th>
+            <th width="8%">CARGO</th>
+            <th width="10%">GARANTIA<br>INICIAL</th>
+            <th width="14%">NOMBRE DEL CLIENTE</th>`;
+        for (let w = 1; w <= maxSemanas; w++) {
+            const lbl = semanaInicioReal + w - 1;
+            tablaIncrementoThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
+        }
+        tablaIncrementoThead += `<th width="4%">GTIA.<br>FINAL</th></tr>`;
+
+        let tablaIncrementoTbody = '';
+        let sumaGarantiaInicial = 0;
+        // Sumas por semana para incremento de garantía
+        const sumIncrementoSemanas = new Array(maxSemanas).fill(0);
+        let sumaGarantiaFinalTotal = 0;
+        creditos.forEach((credito, index) => {
+            const nombreCliente = credito.cliente
+                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                : credito.miembro
+                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                    : "N/A";
+
+            let cargo = "INTEGRANTE";
+            if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+
+            const garantiaInicial = credito.garantia || 0;
+            sumaGarantiaInicial += garantiaInicial;
+
             tablaIncrementoTbody += `
             <tr>
-                <td colspan="2" align="center" style="font-weight:bold; font-size:9px; padding: 5px 0;">TOTAL<br>GARANTIA<br>INICIAL</td>
-                <td align="center" style="font-weight:bold; font-size:11px;">$ ${formatoMoneda(sumaGarantiaInicial)}</td>
-                <td align="right" style="font-weight:bold; padding-right:10px;">TOTAL</td>
+                <td align="center" style="font-weight:bold;">${index + 1}</td>
+                <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
+                <td align="center" style="font-size:11px;">$ ${formatoMoneda(garantiaInicial)}</td>
+                <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
         `;
             for (let w = 1; w <= maxSemanas; w++) {
                 let label = semanaInicioReal + w - 1;
                 let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                const sumaSemana = sumIncrementoSemanas[w - 1] || 0;
-                const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
-                tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
-            }
-            const textoFinalGtia = llena ? `$ ${formatoMoneda(sumaGarantiaFinalTotal)}` : '$ ';
-            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoFinalGtia}</td></tr>`;
+                let valorCelda = '';
+                if (llena) {
+                    let montoSemana = 0;
+                    // 1. Prioridad: Buscar en historial de pagos (ahorro capturado junto con el pago semanal)
+                    if (credito.pagos && credito.pagos.length > 0) {
+                        const pSemana = credito.pagos.find(p => p.numeroPago == label);
+                        if (pSemana && pSemana.montoAhorro > 0) {
+                            montoSemana = pSemana.montoAhorro;
+                        }
+                    }
 
-            // TABLA 3: REGISTRO DE SOLIDARIOS
-            let tablaSolidariosThead = `
+                    // 2. Fallback: Buscar en pagosAhorro independientes
+                    if (montoSemana === 0 && credito.ahorro && credito.ahorro.pagosAhorro && credito.ahorro.pagosAhorro.length > 0) {
+                        const ahorro = credito.ahorro.pagosAhorro[w - 1];
+                        if (ahorro && ahorro.monto > 0) {
+                            montoSemana = ahorro.monto;
+                        }
+                    }
+
+                    if (montoSemana > 0) {
+                        valorCelda = `${formatoMoneda(montoSemana)}`;
+                        // Acumular en totales por semana
+                        sumIncrementoSemanas[w - 1] += montoSemana;
+                    }
+                }
+                tablaIncrementoTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold;">${valorCelda}</td>`;
+            }
+
+            let totalAhorro = 0;
+            if (llena && credito.ahorro) {
+                totalAhorro += (credito.ahorro.montoTotal || 0);
+            }
+            // Acumular garantía final total
+            sumaGarantiaFinalTotal += (llena ? totalAhorro : 0);
+            let finalVal = llena ? `${formatoMoneda(totalAhorro)}` : '$ ';
+            tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${finalVal}</td></tr>`;
+        });
+
+        // Total Incremento
+        tablaIncrementoTbody += `
+        <tr>
+            <td colspan="2" align="center" style="font-weight:bold; font-size:9px; padding: 5px 0;">TOTAL<br>GARANTIA<br>INICIAL</td>
+            <td align="center" style="font-weight:bold; font-size:11px;">$ ${formatoMoneda(sumaGarantiaInicial)}</td>
+            <td align="right" style="font-weight:bold; padding-right:10px;">TOTAL</td>
+    `;
+        for (let w = 1; w <= maxSemanas; w++) {
+            let label = semanaInicioReal + w - 1;
+            let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+            const sumaSemana = sumIncrementoSemanas[w - 1] || 0;
+            const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
+            tablaIncrementoTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
+        }
+        const textoFinalGtia = llena ? `$ ${formatoMoneda(sumaGarantiaFinalTotal)}` : '$ ';
+        tablaIncrementoTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoFinalGtia}</td></tr>`;
+
+        // TABLA 3: REGISTRO DE SOLIDARIOS
+        let tablaSolidariosThead = `
+        <tr>
+            <th colspan="${3 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">REGISTRO DE SOLIDARIOS</th>
+        </tr>
+        <tr>
+            <th width="2%">NO.</th>
+            <th width="8%">CARGO</th>
+            <th width="14%">NOMBRE DEL CLIENTE</th>`;
+        for (let w = 1; w <= maxSemanas; w++) {
+            const lbl = semanaInicioReal + w - 1;
+            tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
+        }
+        tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
+
+        let tablaSolidariosTbody = '';
+        // Sumas por semana para solidarios
+        const sumSolidariosSemanas = new Array(maxSemanas).fill(0);
+        let sumaTotalSolidarios = 0;
+        creditos.forEach((credito, index) => {
+            const nombreCliente = credito.cliente
+                ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
+                : credito.miembro
+                    ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
+                    : "N/A";
+
+            let cargo = "INTEGRANTE";
+            if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
+
+            tablaSolidariosTbody += `
             <tr>
-                <th colspan="${3 + maxSemanas + 1}" align="center" style="font-size:12px; font-weight:bold; color: #000; padding: 5px;">REGISTRO DE SOLIDARIOS</th>
-            </tr>
-            <tr>
-                <th width="2%">NO.</th>
-                <th width="8%">CARGO</th>
-                <th width="14%">NOMBRE DEL CLIENTE</th>`;
+                <td align="center" style="font-weight:bold;">${index + 1}</td>
+                <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
+                <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
+        `;
+            let totalSolidarios = 0;
+            const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
+
             for (let w = 1; w <= maxSemanas; w++) {
-                const lbl = semanaInicioReal + w - 1;
-                tablaSolidariosThead += `<th width="4%" style="font-size:9px;">SEM ${lbl}</th>`;
-            }
-            tablaSolidariosThead += `<th width="4%">TOTAL</th></tr>`;
+                let label = semanaInicioReal + w - 1;
+                let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+                let valorCelda = '';
+                if (llena && contributorId) {
+                    let montoAportadoPorElMiembro = 0;
 
-            let tablaSolidariosTbody = '';
-            // Sumas por semana para solidarios
-            const sumSolidariosSemanas = new Array(maxSemanas).fill(0);
-            let sumaTotalSolidarios = 0;
-            creditosSubGrupo.forEach((credito, index) => {
-                const nombreCliente = credito.cliente
-                    ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
-                    : credito.miembro
-                        ? `${credito.miembro.nombre} ${credito.miembro.apellidos}`
-                        : "N/A";
-
-                let cargo = "INTEGRANTE";
-                if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
-
-                tablaSolidariosTbody += `
-                <tr>
-                    <td align="center" style="font-weight:bold;">${index + 1}</td>
-                    <td align="center" style="font-size:9px; font-weight:bold;">${cargo}</td>
-                    <td align="center" style="font-size:10px; font-weight:bold; text-transform:uppercase;">${nombreCliente}</td>
-            `;
-                let totalSolidarios = 0;
-                const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
-
-                for (let w = 1; w <= maxSemanas; w++) {
-                    let label = semanaInicioReal + w - 1;
-                    let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                    let valorCelda = '';
-                    if (llena && contributorId) {
-                        let montoAportadoPorElMiembro = 0;
-
-                        for (const otroCredito of creditosSubGrupo) {
-                            if (otroCredito.pagos) {
-                                // Buscar pagos solidarios que coincidan con la semana (label)
-                                const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === label && p.pagoSolidario === true);
-                                for (const pSol of pagosSolSemana) {
-                                    // Caso 1: El solidario está en otro crédito (beneficiario) - quien recibió el solidario
-                                    const prestoId = pSol.quienPrestoSolidario && pSol.quienPrestoSolidario._id
-                                        ? pSol.quienPrestoSolidario._id.toString()
-                                        : (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString ? pSol.quienPrestoSolidario.toString() : pSol.quienPrestoSolidario);
-                                    // Contar solo el solidario registrado en el propio crédito del miembro,
-                                    // para no duplicar el aporte desde el crédito beneficiario.
-                                    if (otroCredito._id && credito._id && otroCredito._id.toString() === credito._id.toString() && prestoId === contributorId) {
-                                        montoAportadoPorElMiembro += pSol.montoSolidario;
-                                    }
-                                    else if (otroCredito.miembro && otroCredito.miembro._id.toString() === contributorId && !pSol.quienPrestoSolidario) {
-                                        montoAportadoPorElMiembro += pSol.montoSolidario;
-                                    }
+                    for (const otroCredito of creditos) {
+                        if (otroCredito.pagos) {
+                            // Buscar pagos solidarios que coincidan con la semana (label)
+                            const pagosSolSemana = otroCredito.pagos.filter(p => p.numeroPago === label && p.pagoSolidario === true);
+                            for (const pSol of pagosSolSemana) {
+                                // Caso 1: El solidario está en otro crédito (beneficiario) - quien recibió el solidario
+                                const prestoId = pSol.quienPrestoSolidario && pSol.quienPrestoSolidario._id
+                                    ? pSol.quienPrestoSolidario._id.toString()
+                                    : (pSol.quienPrestoSolidario && pSol.quienPrestoSolidario.toString ? pSol.quienPrestoSolidario.toString() : pSol.quienPrestoSolidario);
+                                // Contar solo el solidario registrado en el propio crédito del miembro,
+                                // para no duplicar el aporte desde el crédito beneficiario.
+                                if (otroCredito._id && credito._id && otroCredito._id.toString() === credito._id.toString() && prestoId === contributorId) {
+                                    montoAportadoPorElMiembro += pSol.montoSolidario;
+                                }
+                                else if (otroCredito.miembro && otroCredito.miembro._id.toString() === contributorId && !pSol.quienPrestoSolidario) {
+                                    montoAportadoPorElMiembro += pSol.montoSolidario;
                                 }
                             }
                         }
-
-                        if (montoAportadoPorElMiembro > 0) {
-                            valorCelda = `${formatoMoneda(montoAportadoPorElMiembro)}`;
-                            totalSolidarios += montoAportadoPorElMiembro;
-                            // Acumular en totales por semana
-                            sumSolidariosSemanas[w - 1] += montoAportadoPorElMiembro;
-                        }
                     }
-                    tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
-                }
-                let textTotalSol = llena && totalSolidarios > 0 ? `${formatoMoneda(totalSolidarios)}` : '$ ';
-                tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
-                // Acumular total final de solidarios por miembro
-                sumaTotalSolidarios += (llena ? totalSolidarios : 0);
-            });
 
-            // Total Solidarios
-            tablaSolidariosTbody += `
-            <tr>
-                <td colspan="3" align="right" style="font-weight:bold; padding-right:10px; padding: 5px 0;">TOTAL</td>
-        `;
-            for (let w = 1; w <= maxSemanas; w++) {
-                let label = semanaInicioReal + w - 1;
-                let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
-                const sumaSemana = sumSolidariosSemanas[w - 1] || 0;
-                const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
-                tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
+                    if (montoAportadoPorElMiembro > 0) {
+                        valorCelda = `${formatoMoneda(montoAportadoPorElMiembro)}`;
+                        totalSolidarios += montoAportadoPorElMiembro;
+                        // Acumular en totales por semana
+                        sumSolidariosSemanas[w - 1] += montoAportadoPorElMiembro;
+                    }
+                }
+                tablaSolidariosTbody += `<td align="center" style="${bgStyle} font-size:10px; font-weight:bold; color: #d97706;">${valorCelda}</td>`;
             }
-            const textoTotalSolid = llena && sumaTotalSolidarios > 0 ? `$ ${formatoMoneda(sumaTotalSolidarios)}` : '$  ';
-            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoTotalSolid}</td></tr>`;
+            let textTotalSol = llena && totalSolidarios > 0 ? `${formatoMoneda(totalSolidarios)}` : '$ ';
+            tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textTotalSol}</td></tr>`;
+            // Acumular total final de solidarios por miembro
+            sumaTotalSolidarios += (llena ? totalSolidarios : 0);
+        });
 
-            // 5. TEMPLATE FINAL Y PDF
-
-
-
-            const claveGrupo = grupo?.clave || "________________";
-
-            // Calcular tasa general (moda de tasaInteres en el subgrupo)
-            let maxFreq = 0;
-            let tasaGeneralModa = 0;
-            const freqMap = {};
-            creditosSubGrupo.forEach(c => {
-                if (c.tasaInteres != null) {
-                    freqMap[c.tasaInteres] = (freqMap[c.tasaInteres] || 0) + 1;
-                    if (freqMap[c.tasaInteres] > maxFreq) {
-                        maxFreq = freqMap[c.tasaInteres];
-                        tasaGeneralModa = c.tasaInteres;
-                    }
-                }
-            });
-
-            // REEMPLAZAR VARIABLES
-            let seccionBody = bodyTemplate
-                .replace('{{grupoNombre}}', grupoNombre)
-                .replace('{{diaVisita}}', diaVisita)
-                .replace('{{clave}}', claveGrupo)
-                .replace('{{horaVisita}}', horaVisita)
-                .replace('{{ciclo}}', ciclo)
-                .replace('{{tasaGeneral}}', `${tasaGeneralModa}%`)
-                .replace('{{tablaThead}}', tablaThead)
-                .replace('{{tablaTbody}}', tablaTbody)
-                .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
-                .replace('{{tablaIncrementoTbody}}', tablaIncrementoTbody)
-                .replace('{{tablaSolidariosThead}}', tablaSolidariosThead)
-                .replace('{{tablaSolidariosTbody}}', tablaSolidariosTbody);
-
-            finalBodies.push(seccionBody);
+        // Total Solidarios
+        tablaSolidariosTbody += `
+        <tr>
+            <td colspan="3" align="right" style="font-weight:bold; padding-right:10px; padding: 5px 0;">TOTAL</td>
+    `;
+        for (let w = 1; w <= maxSemanas; w++) {
+            let label = semanaInicioReal + w - 1;
+            let bgStyle = (label >= 14) ? 'background-color: #dbe5f1;' : '';
+            const sumaSemana = sumSolidariosSemanas[w - 1] || 0;
+            const texto = llena && sumaSemana > 0 ? `$ ${formatoMoneda(sumaSemana)}` : '$ ';
+            tablaSolidariosTbody += `<td align="left" style="${bgStyle} font-weight:bold; font-size:10px;">${texto}</td>`;
         }
+        const textoTotalSolid = llena && sumaTotalSolidarios > 0 ? `$ ${formatoMoneda(sumaTotalSolidarios)}` : '$  ';
+        tablaSolidariosTbody += `<td align="left" style="font-weight:bold; font-size:10px;">${textoTotalSolid}</td></tr>`;
 
-        let htmlCompleto = htmlCompletoOrigin.replace(/<body[^>]*>[\s\S]*?<\/body>/i, '<body>' + finalBodies.join('<div style="page-break-before: always;"></div>') + '</body>');
+        // 5. TEMPLATE FINAL Y PDF
+
+        const claveGrupo = grupo?.clave || "________________";
+
+        // Calcular tasa general (moda de tasaInteres en el grupo)
+        let maxFreq = 0;
+        let tasaGeneralModa = 0;
+        const freqMap = {};
+        creditos.forEach(c => {
+            if (c.tasaInteres != null) {
+                freqMap[c.tasaInteres] = (freqMap[c.tasaInteres] || 0) + 1;
+                if (freqMap[c.tasaInteres] > maxFreq) {
+                    maxFreq = freqMap[c.tasaInteres];
+                    tasaGeneralModa = c.tasaInteres;
+                }
+            }
+        });
+
+        // REEMPLAZAR VARIABLES
+        let seccionBody = bodyTemplate
+            .replace('{{grupoNombre}}', grupoNombre)
+            .replace('{{diaVisita}}', diaVisita)
+            .replace('{{clave}}', claveGrupo)
+            .replace('{{horaVisita}}', horaVisita)
+            .replace('{{ciclo}}', ciclo)
+            .replace('{{tasaGeneral}}', `${tasaGeneralModa}%`)
+            .replace('{{tablaThead}}', tablaThead)
+            .replace('{{tablaTbody}}', tablaTbody)
+            .replace('{{tablaIncrementoThead}}', tablaIncrementoThead)
+            .replace('{{tablaIncrementoTbody}}', tablaIncrementoTbody)
+            .replace('{{tablaSolidariosThead}}', tablaSolidariosThead)
+            .replace('{{tablaSolidariosTbody}}', tablaSolidariosTbody);
+
+        let htmlCompleto = htmlCompletoOrigin.replace(/<body[^>]*>[\s\S]*?<\/body>/i, '<body>' + seccionBody + '</body>');
 
         if (req.query.format === 'html') {
             return res.send(htmlCompleto);
