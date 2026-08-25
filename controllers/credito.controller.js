@@ -47,10 +47,15 @@ exports.crearCredito = async (req, res) => {
         }
 
         // Validar semanas
-        let numSemanas = semanas || (tipoCredito === '8S' ? 8 : 16);
-        if (tipoCredito === 'R') {
+        let numSemanas = 16;
+        if (tipoCredito === '8S') {
+            numSemanas = 8;
+        } else if (tipoCredito === 'R') {
             numSemanas = 16;
+        } else if (semanas) {
+            numSemanas = semanas;
         }
+
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
             ? req.body.saldoTotal
             : (pagoPactadoCalc * numSemanas);
@@ -244,8 +249,9 @@ exports.actualizarCredito = async (req, res) => {
         const datosActualizar = { ...req.body };
         delete datosActualizar.pagos;
 
-        // --- AUTOMATIZACIÓN DE CÁLCULO PARA REFILL ---
+        // --- AUTOMATIZACIÓN DE CÁLCULO PARA REFILL Y 8S ---
         const esRefill = datosActualizar.tipoCredito === 'R' || creditoOriginal.tipoCredito === 'R';
+        const es8S = datosActualizar.tipoCredito === '8S' || creditoOriginal.tipoCredito === '8S';
 
         // Evitamos que los miembros que no actualizaron su crédito pierdan sus saldos y datos,
         // verificando si hubo algún cambio real en los parámetros de su crédito.
@@ -254,7 +260,7 @@ exports.actualizarCredito = async (req, res) => {
         const semanaCambio = datosActualizar.semanaActual && parseInt(datosActualizar.semanaActual) !== parseInt(creditoOriginal.semanaActual || 1);
         const semanasCambio = datosActualizar.semanas && parseInt(datosActualizar.semanas) !== parseInt(creditoOriginal.semanas || 16);
 
-        // Sólo recalculamos si cambiaron el tipo a Refill, o ajustaron el monto/semanas.
+        // Sólo recalculamos si cambiaron el tipo o ajustaron el monto/semanas.
         const esActualizacionReal = tipoCambio || montoCambio || semanaCambio || semanasCambio;
 
         if (esRefill && esActualizacionReal) {
@@ -270,6 +276,26 @@ exports.actualizarCredito = async (req, res) => {
             datosActualizar.pagoPactado = montoSolicitado / semanasRestantes;
             datosActualizar.saldoTotal = montoSolicitado;
             datosActualizar.saldoPendiente = montoSolicitado;
+        } else if (es8S && esActualizacionReal) {
+            const montoSolicitado = datosActualizar.montoSolicitado || creditoOriginal.montoSolicitado;
+            const porc = datosActualizar.porcentajeGarantia !== undefined
+                ? datosActualizar.porcentajeGarantia
+                : (creditoOriginal.porcentajeGarantia !== undefined ? creditoOriginal.porcentajeGarantia : 10);
+
+            datosActualizar.semanas = 8;
+            // Garantía sobre el monto solicitado total (igual que a 16 semanas)
+            if (datosActualizar.garantia === undefined) {
+                datosActualizar.garantia = montoSolicitado * (porc / 100);
+            }
+            // Pago pactado como si fuera a 16 semanas
+            const pactado16 = datosActualizar.pagoPactado || (montoSolicitado / 16);
+            datosActualizar.pagoPactado = pactado16;
+            // Saldo total calculado a 8 semanas
+            const nuevoSaldoTotal = pactado16 * 8;
+            datosActualizar.saldoTotal = nuevoSaldoTotal;
+
+            const totalPagado = (creditoOriginal.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0);
+            datosActualizar.saldoPendiente = Math.max(0, nuevoSaldoTotal - totalPagado);
         }
         // --- FIN AUTOMATIZACIÓN ---
 
