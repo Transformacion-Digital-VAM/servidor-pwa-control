@@ -99,7 +99,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         }
 
         // 2. OBTENER CRÉDITOS PARA ESE CICLO Y MIEMBROS
-        const creditos = await Credito.find({
+        const creditosRaw = await Credito.find({
             miembro: { $in: miembrosIds },
             ciclo: ciclo
         })
@@ -109,9 +109,74 @@ exports.generarHojaControlGrupal = async (req, res) => {
             })
             .populate('cliente');
 
-        if (creditos.length === 0) {
+        if (creditosRaw.length === 0) {
             return res.status(404).json({ message: "No se encontraron créditos para este grupo en el ciclo especificado" });
         }
+
+        // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC + REFILL) ---
+        // Si un miembro tiene CC (semanas 1-8) y R (semanas 9-16), se consolidan en un único registro
+        // para que aparezca una sola vez en la hoja de control con todo el historial unificado.
+        const creditosPorMiembro = new Map();
+        creditosRaw.forEach(c => {
+            const mId = c.miembro ? (c.miembro._id ? c.miembro._id.toString() : c.miembro.toString()) : (c.cliente ? (c.cliente._id ? c.cliente._id.toString() : c.cliente.toString()) : c._id.toString());
+            if (!creditosPorMiembro.has(mId)) {
+                creditosPorMiembro.set(mId, []);
+            }
+            creditosPorMiembro.get(mId).push(c);
+        });
+
+        const creditos = [];
+        miembros.forEach(m => {
+            const mId = m._id.toString();
+            const list = creditosPorMiembro.get(mId);
+            if (!list || list.length === 0) return;
+
+            const creditoR = list.find(c => c.tipoCredito === 'R');
+            const creditoCC = list.find(c => c.tipoCredito === 'CC');
+
+            if (creditoR && creditoCC) {
+                const objR = creditoR.toObject ? creditoR.toObject() : { ...creditoR };
+                const objCC = creditoCC.toObject ? creditoCC.toObject() : { ...creditoCC };
+
+                // Combinar pagos de semanas 1-8 (CC) y semanas 9-16 (R)
+                const todosLosPagos = [...(objCC.pagos || []), ...(objR.pagos || [])];
+                todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+
+                const todosPagosAhorro = [
+                    ...((objCC.ahorro && objCC.ahorro.pagosAhorro) || []),
+                    ...((objR.ahorro && objR.ahorro.pagosAhorro) || [])
+                ];
+
+                const consolidado = {
+                    ...objR,
+                    _id: objR._id,
+                    tipoCredito: 'R',
+                    pagos: todosLosPagos,
+                    ahorro: {
+                        montoTotal: (objCC.ahorro?.montoTotal || 0) + (objR.ahorro?.montoTotal || 0),
+                        pagosAhorro: todosPagosAhorro
+                    },
+                    garantia: objR.garantia !== undefined && objR.garantia > 0 ? objR.garantia : (objCC.garantia || 0),
+                    fechaPrimerPago: objCC.fechaPrimerPago || objR.fechaPrimerPago,
+                    frecuenciaPago: objCC.frecuenciaPago || objR.frecuenciaPago || 'Semanal'
+                };
+                creditos.push(consolidado);
+            } else {
+                const c = list[0];
+                creditos.push(c.toObject ? c.toObject() : c);
+            }
+        });
+
+        // Fallback en caso de créditos sin miembro en el listado inicial
+        creditosPorMiembro.forEach((list, mId) => {
+            const yaAgregado = creditos.some(c => {
+                const idActual = c.miembro ? (c.miembro._id ? c.miembro._id.toString() : c.miembro.toString()) : '';
+                return idActual === mId;
+            });
+            if (!yaAgregado && list.length > 0) {
+                creditos.push(list[0].toObject ? list[0].toObject() : list[0]);
+            }
+        });
 
         // 3. FUNCIONES DE APOYO
         const formatoMoneda = (num) =>
@@ -157,10 +222,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
             return fechas;
         };
 
-
-        const esSoloRefill = creditos.length > 0 && creditos.every(c => c.tipoCredito === 'R');
-        const esSolo8S = creditos.length > 0 && creditos.every(c => c.tipoCredito === '8S');
-        const tiene16Semanas = creditos.some(c => c.tipoCredito === 'CC' || (c.tipoCredito !== 'R' && c.tipoCredito !== '8S') || (c.semanas && c.semanas >= 16));
+        const tieneHistorialCC = creditosRaw.some(c => c.tipoCredito === 'CC');
+        const esSoloRefill = !tieneHistorialCC && creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === 'R');
+        const esSolo8S = creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === '8S');
+        const tiene16Semanas = tieneHistorialCC || creditosRaw.some(c => (c.tipoCredito !== 'R' && c.tipoCredito !== '8S') || (c.semanas && c.semanas >= 16));
 
         let maxSemanas = 16;
         let semanaInicioReal = 1;
@@ -169,7 +234,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
             semanaInicioReal = parseInt(req.query.semanaInicio);
             maxSemanas = 8;
         } else if (esSoloRefill) {
-            // Si todos los créditos del grupo en este ciclo son Refill
+            // Si todos los créditos del grupo en este ciclo son Refill sin CC previo
             if (req.query.semanaInicioRefil) {
                 semanaInicioReal = parseInt(req.query.semanaInicioRefil);
             } else {

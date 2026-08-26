@@ -191,9 +191,32 @@ exports.obtenerCreditos = async (req, res) => {
             await Credito.bulkWrite(operacionesBulk);
         }
 
+        // Para la carga de pagos del asesor: si un integrante tiene un Refill (R) en el mismo ciclo,
+        // se entrega únicamente el R y se omite el CC anterior para no duplicar opciones de pago.
+        let creditosParaEnviar = creditos;
+        if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true') {
+            const miembrosConRefillPorCiclo = new Set();
+            creditos.forEach(c => {
+                if (c.miembro && c.tipoCredito === 'R') {
+                    const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
+                    miembrosConRefillPorCiclo.add(`${miembroId}_${c.ciclo}`);
+                }
+            });
+
+            creditosParaEnviar = creditos.filter(c => {
+                if (c.miembro && c.tipoCredito === 'CC') {
+                    const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
+                    if (miembrosConRefillPorCiclo.has(`${miembroId}_${c.ciclo}`)) {
+                        return false; // Omitir el CC anterior porque el R es la continuación vigente
+                    }
+                }
+                return true;
+            });
+        }
+
         res.json({
             ok: true,
-            creditos
+            creditos: creditosParaEnviar
         });
 
     } catch (error) {
@@ -572,7 +595,7 @@ exports.registrarPago = async (req, res) => {
                 const bId = item.miembro;
                 const bMonto = Number(item.monto);
 
-                const creditoDestino = await Credito.findOne({ miembro: bId, estado: 'Activo' });
+                const creditoDestino = await Credito.findOne({ miembro: bId, estado: 'Activo' }).sort({ tipoCredito: -1, createdAt: -1 });
                 if (creditoDestino) {
                     // Validar duplicado para cada beneficiario
                     const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
@@ -720,8 +743,8 @@ exports.registrarPago = async (req, res) => {
                 return res.status(400).json({ ok: false, msg: 'Debe especificar el miembro beneficiario del solidario (campo miembro o beneficiario)' });
             }
 
-            // Buscar el crédito activo del beneficiario
-            creditoDestino = await Credito.findOne({ miembro: beneficiarioFinal, estado: 'Activo' });
+            // Buscar el crédito activo del beneficiario (priorizando R sobre CC)
+            creditoDestino = await Credito.findOne({ miembro: beneficiarioFinal, estado: 'Activo' }).sort({ tipoCredito: -1, createdAt: -1 });
 
             if (!creditoDestino) {
                 logWarn(req, 'REGISTRAR_PAGO_SOLIDARIO_DESTINO_NOT_FOUND', `No se encontró crédito Activo para el beneficiario seleccionado: ${beneficiarioFinal}`, {
