@@ -25,7 +25,7 @@ exports.crearCredito = async (req, res) => {
         } = req.body;
 
         const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
-        const garantiaCalculada = garantia !== undefined ? garantia : (montoSolicitado * (porc / 100));
+        let garantiaCalculada = garantia !== undefined ? garantia : (montoSolicitado * (porc / 100));
 
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
@@ -53,6 +53,11 @@ exports.crearCredito = async (req, res) => {
             numSemanas = 16;
         } else if (semanas) {
             numSemanas = semanas;
+        }
+
+        // Ajuste de garantía para créditos de 8 semanas: se duplica (x2)
+        if (tipoCredito === '8S' || numSemanas === 8) {
+            garantiaCalculada = garantiaCalculada * 2;
         }
 
         // Si viene pagoPactado en el body se utiliza; si es 8S y viene el pactado de 16s, se duplica para cubrir el total
@@ -296,9 +301,9 @@ exports.actualizarCredito = async (req, res) => {
                 : (creditoOriginal.porcentajeGarantia !== undefined ? creditoOriginal.porcentajeGarantia : 10);
 
             datosActualizar.semanas = 8;
-            // Garantía sobre el monto solicitado
+            // Garantía sobre el monto solicitado (duplicada x2 para 8 semanas)
             if (datosActualizar.garantia === undefined) {
-                datosActualizar.garantia = montoSolicitado * (porc / 100);
+                datosActualizar.garantia = (montoSolicitado * (porc / 100)) * 2;
             }
 
             let pactado8 = datosActualizar.pagoPactado || creditoOriginal.pagoPactado;
