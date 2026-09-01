@@ -21,7 +21,10 @@ exports.crearCredito = async (req, res) => {
             fechaPrimerPago,
             tasaInteres,
             montoSolicitado,
-            porcentajeGarantia
+            porcentajeGarantia,
+            equivalenciaMeses,
+            plazoMeses,
+            frecuenciaPago
         } = req.body;
 
         const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
@@ -52,7 +55,24 @@ exports.crearCredito = async (req, res) => {
         } else if (tipoCredito === 'R') {
             numSemanas = 16;
         } else if (semanas) {
-            numSemanas = semanas;
+            numSemanas = Number(semanas);
+        }
+
+        // Equivalencia de meses tomada directamente del frontend (o por defecto 4)
+        const meses = equivalenciaMeses !== undefined
+            ? Number(equivalenciaMeses)
+            : (plazoMeses !== undefined ? Number(plazoMeses) : 4);
+
+        // Frecuencia de pago: tomar la enviada o deducir si son 8 semanas en 4 meses (Bisemanal)
+        let frecFinal = frecuenciaPago;
+        if (!frecFinal) {
+            if (numSemanas === 8 && meses === 4) {
+                frecFinal = 'Bisemanal';
+            } else if (meses > 0 && (numSemanas / meses) <= 2.5 && numSemanas < 16) {
+                frecFinal = 'Bisemanal';
+            } else {
+                frecFinal = 'Semanal';
+            }
         }
 
         // Ajuste de garantía para créditos de 8 semanas: se duplica (x2)
@@ -63,10 +83,9 @@ exports.crearCredito = async (req, res) => {
         // Si viene pagoPactado en el body se utiliza; si es 8S y viene el pactado de 16s, se duplica para cubrir el total
         let pagoPactadoCalc = req.body.pagoPactado;
         if (!pagoPactadoCalc) {
-            const meses = req.body.equivalenciaMeses || 4;
             const tasa = tasaInteres || 0;
             const totalConInteres = montoSolicitado * (1 + (tasa * meses / 100));
-            pagoPactadoCalc = totalConInteres / numSemanas;
+            pagoPactadoCalc = Math.ceil(totalConInteres / numSemanas);
         } else if (tipoCredito === '8S') {
             // Si el pactado enviado es el de 16 semanas (ej. 900), para 8S debe ser el doble (1800)
             if (pagoPactadoCalc * 8 < montoSolicitado) {
@@ -105,11 +124,11 @@ exports.crearCredito = async (req, res) => {
                 pagosAhorro: []
             },
             fechaPrimerPago,
-            frecuenciaPago: req.body.frecuenciaPago || 'Semanal',
+            frecuenciaPago: frecFinal,
             garantiaPredial: req.body.garantiaPredial || '',
-            equivalenciaMeses: req.body.equivalenciaMeses || 4,
+            equivalenciaMeses: meses,
             grupoOpcional: req.body.grupoOpcional || '',
-            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, req.body.frecuenciaPago || 'Semanal')
+            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, frecFinal)
         };
 
         if (tipoCredito !== 'Individual') {
@@ -1060,13 +1079,15 @@ exports.registrarAbonoGarantia = async (req, res) => {
 };
 
 // helper interno
-function generarCalendarioPagos(fechaPrimerPago, semanas) {
+function generarCalendarioPagos(fechaPrimerPago, semanas, frecuenciaPago = 'Semanal') {
     const fechas = [];
     const fechaBase = new Date(fechaPrimerPago);
+    const frec = (frecuenciaPago || 'Semanal').toLowerCase();
+    const pasoDias = (frec === 'bisemanal' || frec === 'quincenal') ? 14 : (frec === 'mensual' ? 30 : 7);
 
     for (let i = 0; i < semanas; i++) {
         const nuevaFecha = new Date(fechaBase);
-        nuevaFecha.setDate(fechaBase.getDate() + (i * 7));
+        nuevaFecha.setDate(fechaBase.getDate() + (i * pasoDias));
 
         fechas.push({
             numeroPago: i + 1,
