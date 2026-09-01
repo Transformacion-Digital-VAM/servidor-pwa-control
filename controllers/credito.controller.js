@@ -138,7 +138,7 @@ exports.crearCredito = async (req, res) => {
         logAccion(req, 'GUARDAR_CREDITO', {
             descripcion: `Crédito ${tipoCredito} (Ciclo ${ciclo}) guardado/actualizado para ${tipoCredito === 'Individual' ? 'Cliente ' + cliente : 'Miembro ' + miembro} - Monto: $${montoSolicitado}`,
             datos: { tipoCredito, ciclo, miembro, cliente, montoSolicitado, pagoPactado: pagoPactadoCalc, saldoTotal: saldoTotalCalc },
-            resultado: { creditoId: creditoGuardado._id, estado: creditoGuardado.estado, saldoPendiente: creditoGuardado.saldoPendiente, frecuenciaPago: creditoGuardado.frecuenciaPago, equivalenteMeses: creditoGuardado.equivalenciaMeses, grupoOpcional: creditoGuardado.grupoOpcional, tasaInteres: creditoGuardado.tasaInteres }
+            resultado: { creditoId: creditoGuardado._id, estado: creditoGuardado.estado, saldoPendiente: creditoGuardado.saldoPendiente }
         });
 
         res.status(201).json({
