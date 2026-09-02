@@ -7,7 +7,7 @@ exports.obtenerCoordinacion = async (req, res) => {
             nombre: 1,
             municipio: 1,
             coordinador: 1,
-        });
+        }).lean();
 
         res.json(coordinaciones);
     } catch (error) {
@@ -48,7 +48,7 @@ exports.obtenerAsesores = async (req, res) => {
             nombre: 1,
             coordinacion: 1,
             lastLocation: 1,
-        }).populate('coordinacion', 'nombre municipio');
+        }).populate('coordinacion', 'nombre municipio').lean();
 
         res.json(asesores);
     } catch (error) {

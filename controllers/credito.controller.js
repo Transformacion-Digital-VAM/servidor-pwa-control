@@ -184,11 +184,11 @@ exports.obtenerCreditos = async (req, res) => {
                 populate: { path: 'grupo' }
             })
             .populate('cliente')
-            .sort({ ciclo: -1, createdAt: -1 });
+            .sort({ ciclo: -1, createdAt: -1 })
+            .lean();
 
         const hoy = new Date();
         const operacionesBulk = [];
-        let modificados = false;
 
         creditos.forEach(credito => {
             if (credito.estado === 'Activo' && credito.fechaPrimerPago) {
@@ -201,13 +201,12 @@ exports.obtenerCreditos = async (req, res) => {
                             update: { semanaActual: semanaCalculada }
                         }
                     });
-                    modificados = true;
                 }
             }
         });
 
         if (operacionesBulk.length > 0) {
-            await Credito.bulkWrite(operacionesBulk);
+            Credito.bulkWrite(operacionesBulk).catch(err => console.error('Error background bulkWrite:', err));
         }
 
         // Para la carga de pagos del asesor: si un integrante tiene un Refill (R) en el mismo ciclo,
@@ -774,7 +773,7 @@ exports.registrarPago = async (req, res) => {
                 return res.status(404).json({ ok: false, msg: 'No se encontró un crédito activo para el beneficiario seleccionado' });
             }
         } else {
-            // Caso Normal: El dinero se abona al mismo crédito
+            // Caso: El dinero se abona al mismo crédito
             creditoDestino = creditoOrigen;
         }
 

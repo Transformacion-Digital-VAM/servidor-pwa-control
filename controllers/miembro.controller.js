@@ -45,7 +45,7 @@ exports.createMiembro = async (req, res) => {
 
 exports.getMiembros = async (req, res) => {
     try {
-        const miembros = await Miembro.find().populate('grupo');
+        const miembros = await Miembro.find().populate('grupo').lean();
         res.status(200).json(miembros);
     } catch (error) {
         logError(req, 'GET_MIEMBROS_ERROR', error);

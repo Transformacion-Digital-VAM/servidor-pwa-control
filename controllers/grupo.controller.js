@@ -19,21 +19,27 @@ exports.createGrupo = async (req, res) => {
 exports.getGrupos = async (req, res) => {
     try {
         let query = {};
+        const mongoose = require('mongoose');
 
         // Filtro estricto por roles para el listado
-        if (req.user.role === 'asesor') {
-            // El asesor SOLÓ ve sus propios grupos
-            query = { asesor: req.user.id };
-        } else if (req.user.role === 'coordinador') {
-            // El coordinador ve TODO lo de su coordinación
+        if (req.user && req.user.role && req.user.role.toLowerCase() === 'asesor') {
+            const userId = req.user.id;
+            query = {
+                $or: [
+                    { asesor: userId },
+                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
+                ]
+            };
+        } else if (req.user && req.user.role && req.user.role.toLowerCase() === 'coordinador') {
             query = { coordinacion: req.user.coordinacion };
         }
-        // Si es admin, query = {} (ve todo)
+        // Si es admin o master, query = {} (ve todo)
 
         const grupos = await Grupo.find(query)
             .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre')
-            .populate('integrantes');
+            .populate('integrantes')
+            .lean();
 
         res.status(200).json(grupos);
     } catch (error) {

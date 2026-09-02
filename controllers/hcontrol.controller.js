@@ -707,7 +707,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const grupoG = creditos[0]?.miembro?.grupo;
         const nombreG = grupoG?.nombre || "INDIVIDUAL";
         const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
-        res.setHeader('Content-Disposition', `attachment; filename="hoja-control_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
+        const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
+        res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
         res.send(pdfBuffer);
 
     } catch (error) {
@@ -1009,7 +1010,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         res.setHeader('Content-Type', 'application/pdf');
         const nombreArchivo = nombreCliente.replace(/\D/g, '').length === 0 ? nombreCliente.replace(/[^a-zA-Z0-9]/g, '_') : nombreCliente.replace(/\s+/g, '_');
-        res.setHeader('Content-Disposition', `attachment; filename="hoja-control-ind_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
+        const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
+        res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control-ind_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
         res.send(pdfBuffer);
 
     } catch (error) {

@@ -30,12 +30,20 @@ exports.createCliente = async (req, res) => {
 exports.getCliente = async (req, res) => {
     try {
         let query = {};
-        if (req.user?.role === 'asesor') {
-            query = { asesor: req.user.id };
-        } else if (req.user?.role === 'coordinador') {
+        const mongoose = require('mongoose');
+
+        if (req.user && req.user.role && req.user.role.toLowerCase() === 'asesor') {
+            const userId = req.user.id;
+            query = {
+                $or: [
+                    { asesor: userId },
+                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
+                ]
+            };
+        } else if (req.user && req.user.role && req.user.role.toLowerCase() === 'coordinador') {
             query = { coordinacion: req.user.coordinacion };
         }
-        const cliente = await Cliente.find(query).populate('coordinacion', 'nombre').populate('asesor', 'username nombre');
+        const cliente = await Cliente.find(query).populate('coordinacion', 'nombre').populate('asesor', 'username nombre').lean();
         res.status(200).json(cliente);
     } catch (error) {
         logError(req, 'GET_CLIENTES_ERROR', error);
