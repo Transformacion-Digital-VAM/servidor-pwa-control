@@ -2,6 +2,26 @@ const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 
+/**
+ * Función auxiliar para extraer todos los datos del modelo Grupo
+ */
+const formatGrupoData = (grupo) => {
+    if (!grupo) return null;
+    const g = grupo.toObject ? grupo.toObject() : grupo;
+    return {
+        _id: g._id,
+        nombre: g.nombre,
+        clave: g.clave,
+        diaVisita: g.diaVisita,
+        horaVisita: g.horaVisita,
+        integrantes: g.integrantes || [],
+        coordinacion: g.coordinacion,
+        asesor: g.asesor,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt
+    };
+};
+
 exports.createMiembro = async (req, res) => {
     try {
         const { nombre, apellidos, grupo, rol, pagoPactado, ciclo } = req.body;
@@ -25,15 +45,30 @@ exports.createMiembro = async (req, res) => {
         await nuevoMiembro.save();
 
         // Agregar el miembro al array de integrantes del grupo para mantener la sincronización
-        await Grupo.findByIdAndUpdate(grupo, {
-            $addToSet: { integrantes: nuevoMiembro._id }
-        });
+        const grupoActualizado = await Grupo.findByIdAndUpdate(
+            grupo,
+            { $addToSet: { integrantes: nuevoMiembro._id } },
+            { new: true }
+        );
 
         logAccion(req, 'CREAR_MIEMBRO', {
             descripcion: `Miembro creado exitosamente: "${nombre} ${apellidos || ''}" en Grupo "${grupoExiste.nombre || grupoExiste.clave || grupo}"`,
             datos: { nombre, apellidos, grupo, rol, pagoPactado, ciclo },
             resultado: { miembroId: nuevoMiembro._id, grupo: grupoExiste.nombre || grupo }
         });
+
+        // Registrar log del Grupo con todos los datos del modelo Grupo tras añadir el miembro
+        if (grupoActualizado) {
+            logAccion(req, 'AGREGAR_MIEMBRO_A_GRUPO', {
+                descripcion: `Miembro "${nombre} ${apellidos || ''}" (ID: ${nuevoMiembro._id}) añadido al Grupo "${grupoActualizado.nombre}" (Clave: ${grupoActualizado.clave})`,
+                datos: {
+                    miembroId: nuevoMiembro._id,
+                    miembroNombre: `${nombre} ${apellidos || ''}`.trim(),
+                    grupoId: grupoActualizado._id
+                },
+                resultado: formatGrupoData(grupoActualizado)
+            });
+        }
 
         res.status(201).json(nuevoMiembro);
 
@@ -81,13 +116,22 @@ exports.updateMiembro = async (req, res) => {
         // Si cambió el grupo, actualizar ambos grupos para mantener la consistencia
         if (req.body.grupo && oldMiembro.grupo && oldMiembro.grupo.toString() !== req.body.grupo.toString()) {
             // Quitar del grupo anterior
-            await Grupo.findByIdAndUpdate(oldMiembro.grupo, {
+            const grupoAnteriorActualizado = await Grupo.findByIdAndUpdate(oldMiembro.grupo, {
                 $pull: { integrantes: id }
-            });
+            }, { new: true });
+
             // Agregar al nuevo grupo
-            await Grupo.findByIdAndUpdate(req.body.grupo, {
+            const grupoNuevoActualizado = await Grupo.findByIdAndUpdate(req.body.grupo, {
                 $addToSet: { integrantes: id }
-            });
+            }, { new: true });
+
+            if (grupoNuevoActualizado) {
+                logAccion(req, 'AGREGAR_MIEMBRO_A_GRUPO', {
+                    descripcion: `Miembro "${updatedMiembro.nombre} ${updatedMiembro.apellidos || ''}" (ID: ${id}) transferido/añadido al Grupo "${grupoNuevoActualizado.nombre}" (Clave: ${grupoNuevoActualizado.clave})`,
+                    datos: { miembroId: id, grupoAnteriorId: oldMiembro.grupo, grupoNuevoId: req.body.grupo },
+                    resultado: formatGrupoData(grupoNuevoActualizado)
+                });
+            }
         }
 
         logAccion(req, 'ACTUALIZAR_MIEMBRO', {
@@ -115,9 +159,17 @@ exports.deleteMiembro = async (req, res) => {
 
         // Eliminar el miembro del array de integrantes del grupo al que pertenecía
         if (miembro.grupo) {
-            await Grupo.findByIdAndUpdate(miembro.grupo, {
+            const grupoActualizado = await Grupo.findByIdAndUpdate(miembro.grupo, {
                 $pull: { integrantes: id }
-            });
+            }, { new: true });
+
+            if (grupoActualizado) {
+                logAccion(req, 'REMOVER_MIEMBRO_DE_GRUPO', {
+                    descripcion: `Miembro "${miembro.nombre} ${miembro.apellidos || ''}" (ID: ${id}) removido del Grupo "${grupoActualizado.nombre}" (Clave: ${grupoActualizado.clave})`,
+                    datos: { miembroId: id, grupoId: miembro.grupo },
+                    resultado: formatGrupoData(grupoActualizado)
+                });
+            }
         }
 
         logAccion(req, 'ELIMINAR_MIEMBRO', {

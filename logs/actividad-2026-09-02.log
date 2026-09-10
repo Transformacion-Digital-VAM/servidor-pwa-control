@@ -1,0 +1,2 @@
+[2026-09-02 16:10:28.688] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (303ms)
+[2026-09-02 16:18:29.067] [HTTP] [Usuario: Angel Mata | Rol: asesor | ID: 69d6b3c77a11ddb40c799417 | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (288ms)
