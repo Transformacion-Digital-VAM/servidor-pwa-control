@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+const Log = require('../models/Log');
 
 // Directorio de logs
 const LOGS_DIR = path.join(__dirname, '..', 'logs');
@@ -11,6 +13,21 @@ if (!fs.existsSync(LOGS_DIR)) {
         fs.mkdirSync(LOGS_DIR, { recursive: true });
     } catch (err) {
         console.error('Error al crear directorio de logs:', err.message);
+    }
+}
+
+/**
+ * Guardar log en MongoDB de forma asíncrona y no bloqueante
+ */
+function saveLogToDB(logData) {
+    try {
+        if (mongoose.connection.readyState === 1) {
+            Log.create(logData).catch(err => {
+                console.error('[LOGGER-DB] Error al guardar log en MongoDB:', err.message);
+            });
+        }
+    } catch (err) {
+        console.error('[LOGGER-DB] Excepción al preparar log en BD:', err.message);
     }
 }
 
@@ -154,6 +171,23 @@ function logAccion(req, accion, { descripcion, datos, resultado, status = 'EXITO
 
     // Archivo de actividad
     appendToFile('actividad', logLine);
+
+    // Guardar en Base de Datos (MongoDB)
+    saveLogToDB({
+        accion,
+        nivel: status,
+        usuario: {
+            id: user.id,
+            username: user.username,
+            nombre: user.nombre,
+            role: user.role,
+            coordinacion: user.coordinacion,
+            ip: user.ip
+        },
+        descripcion: descripcion || '',
+        datosEntrada: sanitizeData(datos),
+        resultado: sanitizeData(resultado)
+    });
 }
 
 /**
@@ -169,6 +203,22 @@ function logWarn(req, accion, mensaje, datosAdicionales = {}) {
     console.warn(`\x1b[33m[ADVERTENCIA]\x1b[0m \x1b[36m[${accion}]\x1b[0m ${user.identificador} - ${mensaje}`);
 
     appendToFile('actividad', logLine);
+
+    // Guardar en Base de Datos (MongoDB)
+    saveLogToDB({
+        accion,
+        nivel: 'ADVERTENCIA',
+        usuario: {
+            id: user.id,
+            username: user.username,
+            nombre: user.nombre,
+            role: user.role,
+            coordinacion: user.coordinacion,
+            ip: user.ip
+        },
+        descripcion: mensaje,
+        detalles: sanitizeData(datosAdicionales)
+    });
 }
 
 /**
@@ -187,6 +237,26 @@ function logError(req, accion, error, datosAdicionales = {}) {
 
     appendToFile('errores', logLine);
     appendToFile('actividad', `[${timestamp}] [ERROR] ${user.identificador} [ACCION: ${accion}] Error: ${mensajeError}`);
+
+    // Guardar en Base de Datos (MongoDB)
+    saveLogToDB({
+        accion,
+        nivel: 'ERROR',
+        usuario: {
+            id: user.id,
+            username: user.username,
+            nombre: user.nombre,
+            role: user.role,
+            coordinacion: user.coordinacion,
+            ip: user.ip
+        },
+        descripcion: `Error en ${accion}: ${mensajeError}`,
+        detalles: sanitizeData(datosAdicionales),
+        error: {
+            mensaje: mensajeError,
+            stack
+        }
+    });
 }
 
 /**
@@ -214,6 +284,22 @@ function requestLoggerMiddleware(req, res, next) {
             }
 
             appendToFile('actividad', logLine);
+
+            // Guardar peticiones relevantes (alertas, errores y modificaciones) en BD
+            saveLogToDB({
+                accion: `${method} ${originalUrl}`,
+                nivel,
+                usuario: {
+                    id: user.id,
+                    username: user.username,
+                    nombre: user.nombre,
+                    role: user.role,
+                    coordinacion: user.coordinacion,
+                    ip: user.ip
+                },
+                descripcion: `${method} ${originalUrl} -> Status: ${status} (${duracion}ms)`,
+                detalles: { method, originalUrl, status, duracionMs: duracion }
+            });
         });
     }
 
