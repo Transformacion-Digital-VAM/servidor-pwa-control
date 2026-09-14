@@ -80,7 +80,32 @@ exports.createMiembro = async (req, res) => {
 
 exports.getMiembros = async (req, res) => {
     try {
-        const miembros = await Miembro.find().populate('grupo').lean();
+        let query = {};
+        const mongoose = require('mongoose');
+        const user = req.user;
+
+        if (user && user.role) {
+            const role = user.role.toLowerCase();
+            if (role === 'asesor') {
+                const userId = user.id;
+                const asesorIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
+                const gruposAsesor = await Grupo.find({
+                    $or: [
+                        { asesor: userId },
+                        ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: asesorIdObj }] : [])
+                    ]
+                }).select('_id').lean();
+                const grupoIds = gruposAsesor.map(g => g._id);
+                query = { grupo: { $in: grupoIds } };
+            } else if (role === 'coordinador' && user.coordinacion) {
+                const coordId = user.coordinacion;
+                const gruposCoord = await Grupo.find({ coordinacion: coordId }).select('_id').lean();
+                const grupoIds = gruposCoord.map(g => g._id);
+                query = { grupo: { $in: grupoIds } };
+            }
+        }
+
+        const miembros = await Miembro.find(query).populate('grupo').lean();
         res.status(200).json(miembros);
     } catch (error) {
         logError(req, 'GET_MIEMBROS_ERROR', error);

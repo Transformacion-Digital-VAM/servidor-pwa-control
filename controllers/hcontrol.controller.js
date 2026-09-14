@@ -1,11 +1,12 @@
 const Credito = require('../models/Credito');
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
+const Cliente = require('../models/Cliente');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 
-// Instancia global de Puppeteer para reutilización
+// Instancia global de Puppeteer
 let _browser;
 const getBrowser = async () => {
     if (!_browser || !_browser.connected) {
@@ -25,7 +26,7 @@ const getBrowser = async () => {
             ]
         };
 
-        // Búsqueda dinámica de Chrome en Render o local
+        
         const possibleCacheDirs = [
             path.join(process.cwd(), '.puppeteer-cache'),
             process.env.PUPPETEER_CACHE_DIR,
@@ -37,7 +38,7 @@ const getBrowser = async () => {
         for (const cacheDir of possibleCacheDirs) {
             try {
                 if (fs.existsSync(cacheDir)) {
-                    // Función recursiva simple para encontrar el ejecutable 'chrome'
+                    // Función recursiva simple
                     const findChrome = (dir) => {
                         const files = fs.readdirSync(dir);
                         for (const file of files) {
@@ -99,7 +100,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         }
 
         // 2. OBTENER CRÉDITOS PARA ESE CICLO Y MIEMBROS
-        const creditosRaw = await Credito.find({
+        let creditosRaw = await Credito.find({
             miembro: { $in: miembrosIds },
             ciclo: ciclo
         })
@@ -110,7 +111,20 @@ exports.generarHojaControlGrupal = async (req, res) => {
             .populate('cliente');
 
         if (creditosRaw.length === 0) {
-            return res.status(404).json({ message: "No se encontraron créditos para este grupo en el ciclo especificado" });
+            // Fallback: Buscar los créditos más recientes o activos de estos miembros
+            creditosRaw = await Credito.find({
+                miembro: { $in: miembrosIds }
+            })
+                .sort({ ciclo: -1, createdAt: -1 })
+                .populate({
+                    path: 'miembro',
+                    populate: { path: 'grupo' }
+                })
+                .populate('cliente');
+        }
+
+        if (creditosRaw.length === 0) {
+            return res.status(404).json({ message: "No se encontraron créditos para este grupo" });
         }
 
         // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC + REFILL) ---
@@ -346,7 +360,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             }
                             return acc + monto;
                         }, 0);
-                        // Verificar si hay solidarios RECIBIDOS (solo para colorear el fondo)
+                        // Verificar si hay solidarios RECIBIDOS (Identificar por color)
                         const miembroIdStr = credito.miembro && credito.miembro._id ? credito.miembro._id.toString() : (credito.miembro && credito.miembro.toString ? credito.miembro.toString() : credito.miembro);
                         const tieneSolidario = pagosSemana.some(p => {
                             if (p.pagoSolidario !== true || !p.quienPrestoSolidario) return false;
@@ -354,34 +368,61 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             return prestoIdStr !== miembroIdStr;
                         });
                         
-                        // Usar la fecha del primer pago de esa semana
-                        const fechaSemanaObj = new Date(pagosSemana[0].fechaPago);
+                        // Fecha del pago de esa semana (usando el último registrado)
+                        const ultimoPagoSemana = pagosSemana[pagosSemana.length - 1];
+                        const fechaSemanaObj = new Date(ultimoPagoSemana.fechaPago || pagosSemana[0].fechaPago);
                         fechaSemanaObj.setMinutes(fechaSemanaObj.getMinutes() + fechaSemanaObj.getTimezoneOffset());
                         fechaSemanaObj.setHours(0, 0, 0, 0);
 
                         const fechaProgramadaObj = new Date(calendario[w].fechaObj);
                         fechaProgramadaObj.setHours(0, 0, 0, 0);
 
-                        const estaAtrasado = pagosSemana.some(pago => {
-                            const fechaPago = new Date(pago.fechaPago);
-                            fechaPago.setMinutes(fechaPago.getMinutes() + fechaPago.getTimezoneOffset());
-                            fechaPago.setHours(0, 0, 0, 0);
-                            return fechaPago > fechaProgramadaObj;
-                        });
-
-                        const pagoColor = estaAtrasado ? '#b91c1c' : '#2563eb';
                         tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
-                        
 
-                        let valorCelda2 = '';
                         if (montoPagoNormalSemana > 0) {
                             const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
-                            const textoMonto = pagosSemana.some(p => p.pagoSolidario === true)
-                                ? `${formatoMoneda(montoPagoNormalSemana)} / SOL`
-                                : formatoMoneda(montoPagoNormalSemana);
+
+                            // Generar cada línea de monto con su color correspondiente:
+                            // - ROJO para pagos atrasados (provenientes de semanas anteriores) o pagos extemporáneos.
+                            // - AZUL para pagos puntuales de la semana en curso o adelantos.
+                            const lineasSpan = pagosSemana.map((p, indexP) => {
+                                let montoP = p.montoPagado || 0;
+                                if (p.pagoSolidario && p.montoSolidario && p.quienPrestoSolidario) {
+                                    const prestoId = p.quienPrestoSolidario && p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
+                                    if (prestoId !== miembroIdStr) {
+                                        montoP += p.montoSolidario || 0;
+                                    }
+                                }
+                                if (montoP <= 0) return '';
+
+                                let colorP = '#2563eb';
+
+                                // Es atraso si viene explícitamente como esAtraso o si hay múltiples pagos en la semana donde los primeros cubren atrasos
+                                const esAtrasadoDeSemanaPasada = p.esAtraso === true || (pagosSemana.length > 1 && indexP < pagosSemana.length - 1);
+
+                                if (esAtrasadoDeSemanaPasada) {
+                                    colorP = '#b91c1c'; // ROJO para el atraso
+                                } else if (p.esAdelanto === true) {
+                                    colorP = '#2563eb'; // AZUL para adelanto
+                                } else {
+                                    const fPago = new Date(p.fechaPago);
+                                    fPago.setMinutes(fPago.getMinutes() + fPago.getTimezoneOffset());
+                                    fPago.setHours(0, 0, 0, 0);
+                                    if (fPago > fechaProgramadaObj) {
+                                        colorP = '#b91c1c'; // ROJO extemporáneo
+                                    } else {
+                                        colorP = '#2563eb'; // AZUL dentro de fecha
+                                    }
+                                }
+
+                                const textoMontoP = p.pagoSolidario === true ? `${formatoMoneda(montoP)} / SOL` : formatoMoneda(montoP);
+                                const fontSize = pagosSemana.length > 1 ? '8px' : '10px';
+                                return `<span style="font-weight: bold; font-size: ${fontSize}; color: ${colorP}; line-height: 1.1;">${textoMontoP}</span>`;
+                            }).filter(Boolean).join('');
+
                             valorCelda = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
-                                        <span style="font-size: 7px; color: #666;">${fechaFormato}</span>
-                                        <span style="font-weight: bold; font-size: 10px; color: ${pagoColor};">${textoMonto}</span>
+                                        <span style="font-size: 7px; color: #666; margin-bottom: 1px;">${fechaFormato}</span>
+                                        ${lineasSpan}
                                       </div>`;
                         }
 
@@ -707,8 +748,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const grupoG = creditos[0]?.miembro?.grupo;
         const nombreG = grupoG?.nombre || "INDIVIDUAL";
         const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
+        const estadoGrupoParam = req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '';
         const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
-        res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control_${nombreArchivo}_ciclo_${ciclo}.pdf"`);
+        res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control_${nombreArchivo}${estadoGrupoParam}_ciclo_${ciclo}.pdf"`);
         res.send(pdfBuffer);
 
     } catch (error) {
@@ -741,8 +783,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
         let credito = creditos.find(c => c.ciclo == ciclo);
 
         if (!credito && creditos.length > 0) {
-            // Fallback si la BD no guardó el ciclo
-            credito = creditos[0];
+            // Fallback: Buscar primero un crédito Activo o el más reciente
+            credito = creditos.find(c => c.estado === 'Activo') || creditos[0];
         }
 
         if (!credito) {

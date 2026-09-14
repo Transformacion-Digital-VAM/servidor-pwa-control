@@ -88,6 +88,14 @@ const creditoSchema = new mongoose.Schema({
             type: Boolean,
             default: false
         },
+        esAdelanto: {
+            type: Boolean,
+            default: false
+        },
+        esAtraso: {
+            type: Boolean,
+            default: false
+        },
         numeroRecibo: { type: Number, required: false },
         ubicacion: {
             latitud: { type: Number, required: false },
@@ -115,7 +123,12 @@ const creditoSchema = new mongoose.Schema({
     frecuenciaPago: { type: String, required: true },
     garantiaPredial: { type: String, required: false },
     equivalenciaMeses: { type: Number, required: false },
-    grupoOpcional: { type: String, required: false }
+    grupoOpcional: { type: String, required: false },
+    estadoGrupo: {
+        type: String,
+        enum: ['CC', 'R', '8S'],
+        required: false
+    }
 
 }, { timestamps: true });
 

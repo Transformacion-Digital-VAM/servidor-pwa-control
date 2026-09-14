@@ -1,6 +1,7 @@
 const Credito = require('../models/Credito');
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
+const Cliente = require('../models/Cliente');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 
 /** 
@@ -178,12 +179,136 @@ exports.crearCredito = async (req, res) => {
 // READ ALL
 exports.obtenerCreditos = async (req, res) => {
     try {
-        const creditos = await Credito.find()
-            .populate({
-                path: 'miembro',
-                populate: { path: 'grupo' }
+        let query = {};
+        const mongoose = require('mongoose');
+        const user = req.user;
+
+        // 1. Filtrado por rol del usuario o por parámetros de búsqueda
+        if (req.query.asesor && req.query.asesor !== 'todos') {
+            const aId = req.query.asesor;
+            const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
+            const [gruposAsesor, clientesAsesor] = await Promise.all([
+                Grupo.find({
+                    $or: [
+                        { asesor: aId },
+                        ...(mongoose.Types.ObjectId.isValid(aId) ? [{ asesor: aIdObj }] : [])
+                    ]
+                }).select('_id').lean(),
+                Cliente.find({
+                    $or: [
+                        { asesor: aId },
+                        ...(mongoose.Types.ObjectId.isValid(aId) ? [{ asesor: aIdObj }] : [])
+                    ]
+                }).select('_id').lean()
+            ]);
+            const grupoIds = gruposAsesor.map(g => g._id);
+            const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+            const miembroIds = miembros.map(m => m._id);
+            const clienteIds = clientesAsesor.map(c => c._id);
+
+            query = {
+                $or: [
+                    { miembro: { $in: miembroIds } },
+                    { cliente: { $in: clienteIds } }
+                ]
+            };
+        } else if (req.query.coordinacion && req.query.coordinacion !== 'todas') {
+            const coordId = req.query.coordinacion;
+            const [gruposCoord, clientesCoord] = await Promise.all([
+                Grupo.find({ coordinacion: coordId }).select('_id').lean(),
+                Cliente.find({ coordinacion: coordId }).select('_id').lean()
+            ]);
+            const grupoIds = gruposCoord.map(g => g._id);
+            const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+            const miembroIds = miembros.map(m => m._id);
+            const clienteIds = clientesCoord.map(c => c._id);
+
+            query = {
+                $or: [
+                    { miembro: { $in: miembroIds } },
+                    { cliente: { $in: clienteIds } }
+                ]
+            };
+        } else if (user && user.role) {
+            const role = user.role.toLowerCase();
+            if (role === 'asesor') {
+                const userId = user.id;
+                const asesorIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
+
+                const [gruposAsesor, clientesAsesor] = await Promise.all([
+                    Grupo.find({
+                        $or: [
+                            { asesor: userId },
+                            ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: asesorIdObj }] : [])
+                        ]
+                    }).select('_id').lean(),
+                    Cliente.find({
+                        $or: [
+                            { asesor: userId },
+                            ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: asesorIdObj }] : [])
+                        ]
+                    }).select('_id').lean()
+                ]);
+
+                const grupoIds = gruposAsesor.map(g => g._id);
+                const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+                const miembroIds = miembros.map(m => m._id);
+                const clienteIds = clientesAsesor.map(c => c._id);
+
+                query = {
+                    $or: [
+                        { miembro: { $in: miembroIds } },
+                        { cliente: { $in: clienteIds } }
+                    ]
+                };
+            } else if (role === 'coordinador' && user.coordinacion) {
+                const coordId = user.coordinacion;
+                const [gruposCoord, clientesCoord] = await Promise.all([
+                    Grupo.find({ coordinacion: coordId }).select('_id').lean(),
+                    Cliente.find({ coordinacion: coordId }).select('_id').lean()
+                ]);
+
+                const grupoIds = gruposCoord.map(g => g._id);
+                const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+                const miembroIds = miembros.map(m => m._id);
+                const clienteIds = clientesCoord.map(c => c._id);
+
+                query = {
+                    $or: [
+                        { miembro: { $in: miembroIds } },
+                        { cliente: { $in: clienteIds } }
+                    ]
+                };
+            }
+        }
+
+        // 2. Consulta ultraligera sin populates anidados pesados ni campos innecesarios
+        const creditos = await Credito.find(query)
+            .select({
+                tipoCredito: 1,
+                ciclo: 1,
+                miembro: 1,
+                cliente: 1,
+                estado: 1,
+                estadoGrupo: 1,
+                semanas: 1,
+                pagoPactado: 1,
+                saldoTotal: 1,
+                saldoPendiente: 1,
+                fechaPrimerPago: 1,
+                frecuenciaPago: 1,
+                semanaActual: 1,
+                tasaInteres: 1,
+                montoSolicitado: 1,
+                'pagos.numeroPago': 1,
+                'pagos.fechaPago': 1,
+                'pagos.montoPagado': 1,
+                'pagos.montoSolidario': 1,
+                'pagos.pagoSolidario': 1,
+                'pagos.quienPrestoSolidario': 1,
+                'pagos.recuperacionSolidario': 1,
+                'pagos.metodoPago': 1
             })
-            .populate('cliente')
             .sort({ ciclo: -1, createdAt: -1 })
             .lean();
 
@@ -209,8 +334,6 @@ exports.obtenerCreditos = async (req, res) => {
             Credito.bulkWrite(operacionesBulk).catch(err => console.error('Error background bulkWrite:', err));
         }
 
-        // Para la carga de pagos del asesor: si un integrante tiene un Refill (R) en el mismo ciclo,
-        // se entrega únicamente el R y se omite el CC anterior para no duplicar opciones de pago.
         let creditosParaEnviar = creditos;
         if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true') {
             const miembrosConRefillPorCiclo = new Set();
@@ -525,40 +648,43 @@ exports.registrarPago = async (req, res) => {
                 return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
             }
 
-            const numeroPago = (creditoOrigen.pagos || []).length + 1;
             const saldoAnterior = creditoOrigen.saldoPendiente;
-            const nuevoPago = {
-                numeroPago,
-                montoPagado: montoCreditoNum,
-                efectivoCredito: efectivoCredito || 0,
-                transferenciaCredito: transferenciaCredito || 0,
-                tarjetaCredito: tarjetaCredito || 0,
-                depositoCredito: depositoCredito || 0,
-
+            const nuevosPagos = distribuirCuotasPago({
+                montoCreditoNum,
+                pagoPactado: creditoOrigen.pagoPactado,
+                pagosExistentes: creditoOrigen.pagos || [],
+                fechaPagoObj,
+                fechaPrimerPago: creditoOrigen.fechaPrimerPago,
+                frecuenciaPago: creditoOrigen.frecuenciaPago,
+                metodoPago,
+                numeroRecibo,
+                ubicacion,
+                efectivoCredito,
+                transferenciaCredito,
+                tarjetaCredito,
+                depositoCredito,
+                montoAhorroNum,
+                efectivoAhorro,
+                transferenciaAhorro,
+                tarjetaAhorro,
+                depositoAhorro,
                 pagoSolidario: !!pagoSolidario,
-                montoSolidario: montoSolidarioNum,
-                efectivoSolidario: efectivoSolidario || 0,
-                transferenciaSolidario: transferenciaSolidario || 0,
-                tarjetaSolidario: tarjetaSolidario || 0,
-                depositoSolidario: depositoSolidario || 0,
-
-                montoAhorro: montoAhorroNum,
-                efectivoAhorro: efectivoAhorro || 0,
-                transferenciaAhorro: transferenciaAhorro || 0,
-                tarjetaAhorro: tarjetaAhorro || 0,
-                depositoAhorro: depositoAhorro || 0,
-
+                montoSolidarioNum,
+                efectivoSolidario,
+                transferenciaSolidario,
+                tarjetaSolidario,
+                depositoSolidario,
                 recuperacionSolidario: !!recuperacionSolidario,
+                quienPrestoSolidario: creditoOrigen.miembro
+            });
 
-                fechaPago: fechaPago || new Date(),
-                metodoPago: metodoPago || 'EFECTIVO',
+            let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
+            for (const pItem of nuevosPagos) {
+                totalHistInd += (pItem.montoPagado || 0) + (pItem.montoSolidario || 0);
+                pItem.totalPagado = totalHistInd;
+                creditoOrigen.pagos.push(pItem);
+            }
 
-                numeroRecibo: numeroRecibo || null,
-                totalPagado: (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0) + montoCreditoNum,
-                ...(ubicacion ? { ubicacion } : {})
-            };
-
-            creditoOrigen.pagos.push(nuevoPago);
             creditoOrigen.saldoPendiente -= montoCreditoNum;
 
             // Actualizar saldo solidario si aplica (Individual)
@@ -568,7 +694,9 @@ exports.registrarPago = async (req, res) => {
                 } else {
                     creditoOrigen.saldoSolidario = (creditoOrigen.saldoSolidario || 0) + montoSolidarioNum;
                     // Auto-asignar quién presta el solidario (el miembro del crédito)
-                    nuevoPago.quienPrestoSolidario = creditoOrigen.miembro;
+                    for (const np of nuevosPagos) {
+                        np.quienPrestoSolidario = creditoOrigen.miembro;
+                    }
                 }
             }
 
@@ -583,11 +711,12 @@ exports.registrarPago = async (req, res) => {
 
             await creditoOrigen.save();
 
+            const numerosPagoStr = nuevosPagos.map(p => p.numeroPago).join(', ');
             logAccion(req, 'REGISTRAR_PAGO_INDIVIDUAL', {
-                descripcion: `Pago Individual # ${numeroPago} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum})`,
+                descripcion: `Pago Individual #${numerosPagoStr} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum})`,
                 datos: { creditoId: id, montoCreditoNum, montoAhorroNum, metodoPago, numeroRecibo },
                 resultado: {
-                    numeroPago,
+                    numerosPago: numerosPagoStr,
                     saldoAnterior,
                     nuevoSaldo: creditoOrigen.saldoPendiente,
                     estado: creditoOrigen.estado,
@@ -813,68 +942,45 @@ exports.registrarPago = async (req, res) => {
             return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
         }
 
-        // --- CREACIÓN DEL REGISTRO DE PAGO ---
-        let numeroPago;
-        const pagosDestino = creditoDestino.pagos || [];
-        if (pagosDestino.length === 0) {
-            numeroPago = 1;
-        } else {
-            const ultimoPago = pagosDestino[pagosDestino.length - 1];
-            const fechaAhora = fechaPagoObj;
-            const fechaUltimo = new Date(ultimoPago.fechaPago);
-
-            if (fechaAhora.toDateString() === fechaUltimo.toDateString()) {
-                numeroPago = ultimoPago.numeroPago;
-            } else {
-                numeroPago = (ultimoPago.numeroPago || 0) + 1;
-            }
-        }
-
-        // Calcular el historial del total pagado
-        const totalHistorico = pagosDestino.reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
-        const nuevoTotalPagado = totalHistorico + abonoAlCredito;
+        // --- CREACIÓN DEL REGISTRO DE PAGO (CON DESGLOSE AUTOMÁTICO DE CUOTAS / ADELANTOS) ---
         const saldoAnteriorDestino = creditoDestino.saldoPendiente;
 
-        const nuevoPago = {
-            numeroPago,
-            montoPagado: montoCreditoNum,
-            efectivoCredito: efectivoCredito || 0,
-            transferenciaCredito: transferenciaCredito || 0,
-            tarjetaCredito: tarjetaCredito || 0,
-            depositoCredito: depositoCredito || 0,
-
+        const nuevosPagos = distribuirCuotasPago({
+            montoCreditoNum,
+            pagoPactado: creditoDestino.pagoPactado,
+            pagosExistentes: creditoDestino.pagos || [],
+            fechaPagoObj,
+            fechaPrimerPago: creditoDestino.fechaPrimerPago,
+            frecuenciaPago: creditoDestino.frecuenciaPago,
+            metodoPago,
+            numeroRecibo,
+            ubicacion,
+            efectivoCredito,
+            transferenciaCredito,
+            tarjetaCredito,
+            depositoCredito,
+            montoAhorroNum,
+            efectivoAhorro,
+            transferenciaAhorro,
+            tarjetaAhorro,
+            depositoAhorro,
             pagoSolidario: !!pagoSolidario,
-            montoSolidario: montoSolidarioNum,
-            efectivoSolidario: efectivoSolidario || 0,
-            transferenciaSolidario: transferenciaSolidario || 0,
-            tarjetaSolidario: tarjetaSolidario || 0,
-            depositoSolidario: depositoSolidario || 0,
-
-            montoAhorro: montoAhorroNum,
-            efectivoAhorro: efectivoAhorro || 0,
-            transferenciaAhorro: transferenciaAhorro || 0,
-            tarjetaAhorro: tarjetaAhorro || 0,
-            depositoAhorro: depositoAhorro || 0,
-
+            montoSolidarioNum,
+            efectivoSolidario,
+            transferenciaSolidario,
+            tarjetaSolidario,
+            depositoSolidario,
             recuperacionSolidario: !!recuperacionSolidario,
-
-            fechaPago: fechaPago || new Date(),
-            metodoPago: metodoPago || 'EFECTIVO',
-            numeroRecibo: numeroRecibo || null,
-            totalPagado: nuevoTotalPagado,
-
-            // Solo asignar si es un apoyo a un TERCERO, no si es recuperación a uno mismo
             quienPrestoSolidario: (pagoSolidario && !recuperacionSolidario) ? creditoOrigen.miembro : undefined,
+            beneficiariosSolidarios: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && beneficiariosSolidarios ? beneficiariosSolidarios : undefined
+        });
 
-            // Si es el que presta, guardamos a quién ayudó (si el frontend enviara un array de beneficiarios)
-            // Si es recuperación, guardamos a quién le devolvió
-            beneficiariosSolidarios: ((pagoSolidario && !recuperacionSolidario) || recuperacionSolidario) && beneficiariosSolidarios ? beneficiariosSolidarios : undefined,
-
-            ...(ubicacion ? { ubicacion } : {})
-        };
-
-        // Agregar pago al crédito de destino
-        creditoDestino.pagos.push(nuevoPago);
+        let totalHistoricoDestino = (creditoDestino.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
+        for (const pItem of nuevosPagos) {
+            totalHistoricoDestino += (pItem.montoPagado || 0) + (pItem.montoSolidario || 0);
+            pItem.totalPagado = totalHistoricoDestino;
+            creditoDestino.pagos.push(pItem);
+        }
 
         // Restar saldo al crédito de destino
         // Si es recuperación, restamos montoCreditoNum. Si es apoyo, restamos montoSolidarioNum.
@@ -905,8 +1011,9 @@ exports.registrarPago = async (req, res) => {
 
         await creditoDestino.save();
 
+        const numerosPagoDestinoStr = nuevosPagos.map(p => p.numeroPago).join(', ');
         logAccion(req, 'REGISTRAR_PAGO', {
-            descripcion: `Pago #${numeroPago} registrado en Crédito ${creditoDestino._id} (Monto: $${montoCreditoNum}, Solidario: $${montoSolidarioNum}, Ahorro: $${montoAhorroNum})`,
+            descripcion: `Pago #${numerosPagoDestinoStr} registrado en Crédito ${creditoDestino._id} (Monto: $${montoCreditoNum}, Solidario: $${montoSolidarioNum}, Ahorro: $${montoAhorroNum})`,
             datos: {
                 creditoDestinoId: creditoDestino._id,
                 creditoOrigenId: id,
@@ -919,7 +1026,7 @@ exports.registrarPago = async (req, res) => {
                 numeroRecibo
             },
             resultado: {
-                numeroPago,
+                numerosPago: numerosPagoDestinoStr,
                 saldoAnterior: saldoAnteriorDestino,
                 nuevoSaldoPendiente: creditoDestino.saldoPendiente,
                 saldoSolidario: creditoDestino.saldoSolidario,
@@ -1076,6 +1183,238 @@ exports.registrarAbonoGarantia = async (req, res) => {
         });
     }
 };
+
+// helper interno para distribuir cuotas y detectar adelantos
+function distribuirCuotasPago({
+    montoCreditoNum,
+    pagoPactado,
+    pagosExistentes = [],
+    fechaPagoObj,
+    fechaPrimerPago,
+    frecuenciaPago,
+    metodoPago,
+    numeroRecibo,
+    ubicacion,
+    efectivoCredito = 0,
+    transferenciaCredito = 0,
+    tarjetaCredito = 0,
+    depositoCredito = 0,
+    montoAhorroNum = 0,
+    efectivoAhorro = 0,
+    transferenciaAhorro = 0,
+    tarjetaAhorro = 0,
+    depositoAhorro = 0,
+    pagoSolidario = false,
+    montoSolidarioNum = 0,
+    efectivoSolidario = 0,
+    transferenciaSolidario = 0,
+    tarjetaSolidario = 0,
+    depositoSolidario = 0,
+    recuperacionSolidario = false,
+    quienPrestoSolidario,
+    beneficiariosSolidarios
+}) {
+    // Si es solidario o no hay abono a crédito o no hay pactado definido (>0):
+    if (pagoSolidario || recuperacionSolidario || montoCreditoNum <= 0 || !pagoPactado || pagoPactado <= 0) {
+        let numeroPago = 1;
+        if (pagosExistentes.length > 0) {
+            const ultimoPago = pagosExistentes[pagosExistentes.length - 1];
+            const fechaUltimo = new Date(ultimoPago.fechaPago);
+            if (fechaPagoObj.toDateString() === fechaUltimo.toDateString()) {
+                numeroPago = ultimoPago.numeroPago;
+            } else {
+                numeroPago = (ultimoPago.numeroPago || 0) + 1;
+            }
+        }
+        return [{
+            numeroPago,
+            montoPagado: montoCreditoNum,
+            efectivoCredito,
+            transferenciaCredito,
+            tarjetaCredito,
+            depositoCredito,
+            pagoSolidario: !!pagoSolidario,
+            montoSolidario: montoSolidarioNum,
+            efectivoSolidario,
+            transferenciaSolidario,
+            tarjetaSolidario,
+            depositoSolidario,
+            montoAhorro: montoAhorroNum,
+            efectivoAhorro,
+            transferenciaAhorro,
+            tarjetaAhorro,
+            depositoAhorro,
+            recuperacionSolidario: !!recuperacionSolidario,
+            esAdelanto: false,
+            fechaPago: fechaPagoObj,
+            metodoPago: metodoPago || 'EFECTIVO',
+            numeroRecibo: numeroRecibo || null,
+            quienPrestoSolidario,
+            beneficiariosSolidarios,
+            ...(ubicacion ? { ubicacion } : {})
+        }];
+    }
+
+    // Calcular cuánto se ha pagado por semana hasta ahora
+    const pagadoPorSemana = {};
+    pagosExistentes.forEach(p => {
+        const num = p.numeroPago || 1;
+        const monto = (p.montoPagado || 0) + (p.pagoSolidario && !p.recuperacionSolidario ? (p.montoSolidario || 0) : 0);
+        pagadoPorSemana[num] = (pagadoPorSemana[num] || 0) + monto;
+    });
+
+    // Calcular semana calendario actual
+    const semanaCalendario = Number(calcularSemanaActual(fechaPrimerPago, frecuenciaPago || 'Semanal', fechaPagoObj)) || 1;
+
+    const nuevosPagos = [];
+    let restanteCredito = montoCreditoNum;
+    let ahorroRestante = montoAhorroNum;
+    let efRestante = Number(efectivoCredito) || 0;
+    let trRestante = Number(transferenciaCredito) || 0;
+    let tjRestante = Number(tarjetaCredito) || 0;
+    let dpRestante = Number(depositoCredito) || 0;
+
+    // Si los métodos no venían desglosados pero se mandó montoCreditoNum, asignarlo a su método principal
+    if (efRestante === 0 && trRestante === 0 && tjRestante === 0 && dpRestante === 0 && montoCreditoNum > 0) {
+        if (metodoPago === 'TRANSFERENCIA') trRestante = montoCreditoNum;
+        else if (metodoPago === 'TARJETA') tjRestante = montoCreditoNum;
+        else if (metodoPago === 'DEPOSITO') dpRestante = montoCreditoNum;
+        else efRestante = montoCreditoNum;
+    }
+
+    const construirItemPago = (numPago, esAdelantoFlag, esAtrasoFlag, montoCuota) => {
+        let montoPorCubrir = montoCuota;
+        const efCuota = Math.min(efRestante, montoPorCubrir);
+        montoPorCubrir -= efCuota;
+        efRestante -= efCuota;
+
+        const trCuota = Math.min(trRestante, montoPorCubrir);
+        montoPorCubrir -= trCuota;
+        trRestante -= trCuota;
+
+        const tjCuota = Math.min(tjRestante, montoPorCubrir);
+        montoPorCubrir -= tjCuota;
+        tjRestante -= tjCuota;
+
+        const dpCuota = Math.min(dpRestante, montoPorCubrir);
+        montoPorCubrir -= dpCuota;
+        dpRestante -= dpCuota;
+
+        let cuotaMetodo = metodoPago || 'EFECTIVO';
+        const usedMethods = [efCuota, trCuota, tjCuota, dpCuota].filter(v => v > 0);
+        if (usedMethods.length > 1) {
+            cuotaMetodo = 'MIXTO';
+        } else if (trCuota > 0) cuotaMetodo = 'TRANSFERENCIA';
+        else if (tjCuota > 0) cuotaMetodo = 'TARJETA';
+        else if (dpCuota > 0) cuotaMetodo = 'DEPOSITO';
+        else cuotaMetodo = 'EFECTIVO';
+
+        // Solo la primera cuota recibe el ahorro
+        const ahorroCuota = ahorroRestante;
+        ahorroRestante = 0;
+
+        return {
+            numeroPago: numPago,
+            montoPagado: montoCuota,
+            efectivoCredito: efCuota,
+            transferenciaCredito: trCuota,
+            tarjetaCredito: tjCuota,
+            depositoCredito: dpCuota,
+            pagoSolidario: false,
+            montoSolidario: 0,
+            efectivoSolidario: 0,
+            transferenciaSolidario: 0,
+            tarjetaSolidario: 0,
+            depositoSolidario: 0,
+            montoAhorro: ahorroCuota,
+            efectivoAhorro: ahorroCuota > 0 ? efectivoAhorro : 0,
+            transferenciaAhorro: ahorroCuota > 0 ? transferenciaAhorro : 0,
+            tarjetaAhorro: ahorroCuota > 0 ? tarjetaAhorro : 0,
+            depositoAhorro: ahorroCuota > 0 ? depositoAhorro : 0,
+            recuperacionSolidario: false,
+            esAdelanto: esAdelantoFlag,
+            esAtraso: esAtrasoFlag,
+            fechaPago: fechaPagoObj,
+            metodoPago: cuotaMetodo,
+            numeroRecibo: numeroRecibo || null,
+            ...(ubicacion ? { ubicacion } : {})
+        };
+    };
+
+    // 1. Calcular deuda de semanas pasadas (atrasos estrictos de semanas anteriores)
+    let deudaAtrasosPasados = 0;
+    for (let s = 1; s < semanaCalendario; s++) {
+        const pagado = pagadoPorSemana[s] || 0;
+        if (pagado < pagoPactado) {
+            deudaAtrasosPasados += (pagoPactado - pagado);
+        }
+    }
+
+    // 2. Calcular faltante de la semana actual
+    const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
+
+    // A) Primero cubrimos atrasos de semanas pasadas (se registran con esAtraso = true en la casilla de la semana actual)
+    if (deudaAtrasosPasados > 0 && restanteCredito > 0) {
+        let montoParaAtrasos = Math.min(restanteCredito, deudaAtrasosPasados);
+        let tempAtrasos = montoParaAtrasos;
+
+        while (tempAtrasos > 0) {
+            const montoCuota = Math.min(tempAtrasos, pagoPactado);
+            nuevosPagos.push(construirItemPago(semanaCalendario, false, true, montoCuota));
+            tempAtrasos -= montoCuota;
+            restanteCredito -= montoCuota;
+        }
+
+        // Actualizar cobertura interna de semanas anteriores
+        let tempMonto = montoParaAtrasos;
+        for (let s = 1; s < semanaCalendario && tempMonto > 0; s++) {
+            const pagado = pagadoPorSemana[s] || 0;
+            const falta = Math.max(0, pagoPactado - pagado);
+            if (falta > 0) {
+                const abono = Math.min(tempMonto, falta);
+                pagadoPorSemana[s] = pagado + abono;
+                tempMonto -= abono;
+            }
+        }
+    }
+
+    // B) Luego cubrimos la cuota de la semana actual (se registra con esAtraso = false en la casilla de la semana actual)
+    if (faltaSemanaActual > 0 && restanteCredito > 0) {
+        let montoParaActual = Math.min(restanteCredito, faltaSemanaActual);
+        let tempActual = montoParaActual;
+
+        while (tempActual > 0) {
+            const montoCuota = Math.min(tempActual, pagoPactado);
+            nuevosPagos.push(construirItemPago(semanaCalendario, false, false, montoCuota));
+            tempActual -= montoCuota;
+            restanteCredito -= montoCuota;
+        }
+
+        pagadoPorSemana[semanaCalendario] = (pagadoPorSemana[semanaCalendario] || 0) + montoParaActual;
+    }
+
+    // C) Si aún queda dinero restante, es un ADELANTO para semanas futuras (se registra con esAdelanto = true, esAtraso = false)
+    if (restanteCredito > 0) {
+        let semanaFutura = semanaCalendario + 1;
+        while (pagadoPorSemana[semanaFutura] && pagadoPorSemana[semanaFutura] >= pagoPactado) {
+            semanaFutura++;
+        }
+
+        while (restanteCredito > 0) {
+            const pagadoActual = pagadoPorSemana[semanaFutura] || 0;
+            const faltaSemana = Math.max(0, pagoPactado - pagadoActual);
+            const montoCuota = faltaSemana > 0 ? Math.min(restanteCredito, faltaSemana) : Math.min(restanteCredito, pagoPactado);
+
+            nuevosPagos.push(construirItemPago(semanaFutura, true, false, montoCuota));
+
+            pagadoPorSemana[semanaFutura] = (pagadoPorSemana[semanaFutura] || 0) + montoCuota;
+            restanteCredito -= montoCuota;
+            semanaFutura++;
+        }
+    }
+
+    return nuevosPagos;
+}
 
 // helper interno
 function generarCalendarioPagos(fechaPrimerPago, semanas, frecuenciaPago = 'Semanal') {

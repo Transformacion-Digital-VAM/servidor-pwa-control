@@ -54,7 +54,7 @@ exports.getCliente = async (req, res) => {
 exports.getClientePorId = async (req, res) => {
     try {
         const userRole = req.user?.role;
-        if (!['admin', 'master', 'superadmin'].includes(userRole)) {
+        if (!['admin', 'master', 'superadmin', 'lector'].includes(userRole)) {
             logWarn(req, 'GET_CLIENTE_POR_ID_DENEGADO', `Permisos insuficientes para consultar cliente (Rol: ${userRole})`, { id: req.params.id });
             return res.status(403).json({ message: "No tienes permisos para obtener clientes" });
         }
