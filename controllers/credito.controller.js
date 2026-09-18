@@ -307,7 +307,12 @@ exports.obtenerCreditos = async (req, res) => {
                 'pagos.pagoSolidario': 1,
                 'pagos.quienPrestoSolidario': 1,
                 'pagos.recuperacionSolidario': 1,
-                'pagos.metodoPago': 1
+                'pagos.metodoPago': 1,
+                'pagos.numeroRecibo': 1,
+                'pagos.montoAhorro': 1,
+                'pagos.esAtraso': 1,
+                'pagos.esAdelanto': 1,
+                ahorro: 1
             })
             .sort({ ciclo: -1, createdAt: -1 })
             .lean();

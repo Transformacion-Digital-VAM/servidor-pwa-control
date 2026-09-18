@@ -1,0 +1,2 @@
+[2026-09-14 21:01:14.299] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (220ms)
+[2026-09-14 21:55:13.274] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (218ms)

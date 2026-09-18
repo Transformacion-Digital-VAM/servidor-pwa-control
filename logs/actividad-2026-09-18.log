@@ -1,0 +1,5 @@
+[2026-09-18 17:07:02.463] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (204ms)
+[2026-09-18 17:08:37.284] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (161ms)
+[2026-09-18 17:10:13.532] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (145ms)
+[2026-09-18 17:10:23.007] [HTTP] [Usuario: Diego Rico | Rol: asesor | ID: 69a868f114891c1c07ffd414 | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (217ms)
+[2026-09-18 17:39:58.689] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (266ms)

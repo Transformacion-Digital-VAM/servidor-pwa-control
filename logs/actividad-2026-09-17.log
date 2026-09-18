@@ -1,0 +1,4 @@
+[2026-09-17 20:47:31.423] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (267ms)
+[2026-09-17 20:47:36.462] [HTTP] [Usuario: Melissa | Rol: asesor | ID: 69fd0ed39c0848064eb2b40c | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (884ms)
+[2026-09-17 20:50:30.690] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (493ms)
+[2026-09-17 20:50:46.211] [HTTP] [Usuario: Melissa | Rol: asesor | ID: 69fd0ed39c0848064eb2b40c | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (888ms)
