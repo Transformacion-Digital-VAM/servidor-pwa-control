@@ -2,6 +2,7 @@ const Credito = require('../models/Credito');
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
 const Cliente = require('../models/Cliente');
+const { consolidarPagosIndividual } = require('./credito.controller');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
@@ -809,14 +810,15 @@ exports.generarHojaControlIndividual = async (req, res) => {
             baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
 
             const frecuencia = (creditoActual.frecuenciaPago || "Semanal").toLowerCase();
+            const pagosProcesados = consolidarPagosIndividual(creditoActual.pagos || []);
 
             // Calcular inicio de renderizado y total de semanas a mostrar
             let semanaInicioReal = 1;
             let semanasRender = semanasTotales;
             if (creditoActual.tipoCredito === 'R') {
                 let inicioRefill = 9;
-                if (creditoActual.pagos && creditoActual.pagos.length > 0) {
-                    inicioRefill = creditoActual.pagos[0].numeroPago || 9;
+                if (pagosProcesados && pagosProcesados.length > 0) {
+                    inicioRefill = pagosProcesados[0].numeroPago || 9;
                 }
                 semanaInicioReal = inicioRefill;
                 semanasRender = 8; // Un Refill siempre genera 8 semanas de hoja de control
@@ -851,8 +853,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 let pagoReal = 0;
                 let foundPayment = false;
                 let fechaPagoRealStr = '';
-                if (creditoActual.pagos) {
-                    const pagosSemana = creditoActual.pagos.filter(p => p.numeroPago === semanaNumeroActual);
+                if (pagosProcesados && pagosProcesados.length > 0) {
+                    const pagosSemana = pagosProcesados.filter(p => p.numeroPago === semanaNumeroActual);
                     if (pagosSemana.length > 0) {
                         pagoReal = pagosSemana.reduce((acc, p) => {
                             let monto = (p.montoPagado !== undefined && p.montoPagado !== null && p.montoPagado > 0)
