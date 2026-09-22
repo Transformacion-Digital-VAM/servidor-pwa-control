@@ -307,7 +307,8 @@ exports.obtenerCreditos = async (req, res) => {
                 'pagos.pagoSolidario': 1,
                 'pagos.quienPrestoSolidario': 1,
                 'pagos.recuperacionSolidario': 1,
-                'pagos.metodoPago': 1
+                'pagos.metodoPago': 1,
+                'pagos.numeroRecibo': 1
             })
             .sort({ ciclo: -1, createdAt: -1 })
             .lean();
@@ -572,7 +573,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion
+            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago
         } = req.body;
 
         const beneficiariosSolidarios = Array.isArray(req.body.beneficiariosSolidarios)
@@ -626,26 +627,43 @@ exports.registrarPago = async (req, res) => {
                 return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
             }
 
-            // Validar duplicado: mismo monto, método y fecha (mismo día)
+            // --- VALIDACIÓN ANTI-DUPLICADO PARA CRÉDITO INDIVIDUAL ---
             const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
-            const existeDuplicado = (creditoOrigen.pagos || []).some(p => {
-                const fechaPagoExistente = new Date(p.fechaPago);
+            const numeroPagoNum = numeroPago ? Number(numeroPago) : null;
+
+            // 1. Doble clic: mismo monto + mismo método registrado en los últimos 30 segundos
+            const VENTANA_DOBLE_CLIC_MS = 30 * 1000; // 30 segundos
+            const esDobleClic = (creditoOrigen.pagos || []).some(p => {
+                const fechaExistente = new Date(p.fechaPago);
+                const diferenciaMs = Math.abs(fechaPagoObj - fechaExistente);
+                const coincideSemana = numeroPagoNum && p.numeroPago ? p.numeroPago === numeroPagoNum : true;
                 return (
-                    fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
+                    diferenciaMs <= VENTANA_DOBLE_CLIC_MS &&
                     p.montoPagado === montoCreditoNum &&
                     p.metodoPago === (metodoPago || 'EFECTIVO') &&
                     p.montoSolidario === montoSolidarioNum &&
-                    p.montoAhorro === montoAhorroNum
+                    p.montoAhorro === montoAhorroNum &&
+                    coincideSemana
                 );
             });
-            if (existeDuplicado) {
-                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_DUPLICADO', 'Pago duplicado detectado para crédito individual en la misma fecha', {
-                    creditoId: id,
-                    montoCredito: montoCreditoNum,
-                    fecha: fechaPagoObj.toISOString(),
-                    metodoPago
+            if (esDobleClic) {
+                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_DOBLE_CLIC', 'Posible doble clic detectado (mismo pago en < 30s)', {
+                    creditoId: id, montoCredito: montoCreditoNum, metodoPago
                 });
-                return res.status(400).json({ ok: false, msg: 'Ya existe un pago igual registrado para este crédito en el mismo día.' });
+                return res.status(400).json({ ok: false, msg: 'Pago duplicado: ya se registró este mismo monto hace menos de 30 segundos. Si es un abono diferente, espera un momento e intenta de nuevo.' });
+            }
+
+            // 2. No exceder el saldo pendiente total del crédito
+            //    Se usa saldoPendiente (no pagoPactado) porque el cliente puede llegar
+            //    a pagar deudas de semanas anteriores junto con el pago actual.
+            if (montoCreditoNum > creditoOrigen.saldoPendiente) {
+                logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_EXCEDE_SALDO', 'El abono excede el saldo pendiente total del crédito', {
+                    creditoId: id, montoCreditoNum, saldoPendiente: creditoOrigen.saldoPendiente
+                });
+                return res.status(400).json({
+                    ok: false,
+                    msg: `El monto a registrar ($${montoCreditoNum}) excede el saldo pendiente del crédito ($${creditoOrigen.saldoPendiente}).`
+                });
             }
 
             const saldoAnterior = creditoOrigen.saldoPendiente;
@@ -675,7 +693,9 @@ exports.registrarPago = async (req, res) => {
                 tarjetaSolidario,
                 depositoSolidario,
                 recuperacionSolidario: !!recuperacionSolidario,
-                quienPrestoSolidario: creditoOrigen.miembro
+                quienPrestoSolidario: creditoOrigen.miembro,
+                tipoCredito: 'Individual',
+                numeroPagoEspecifico: numeroPagoNum
             });
 
             let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
@@ -1212,8 +1232,61 @@ function distribuirCuotasPago({
     depositoSolidario = 0,
     recuperacionSolidario = false,
     quienPrestoSolidario,
-    beneficiariosSolidarios
+    beneficiariosSolidarios,
+    tipoCredito = 'CC',
+    numeroPagoEspecifico = null
 }) {
+    // Calcular semana calendario actual
+    const semanaCalendario = Number(calcularSemanaActual(fechaPrimerPago, frecuenciaPago || 'Semanal', fechaPagoObj)) || 1;
+
+    // Si se especificó explícitamente a qué semana/cuota se debe abonar:
+    if (numeroPagoEspecifico && Number(numeroPagoEspecifico) > 0) {
+        const numEsp = Number(numeroPagoEspecifico);
+        const esAtraso = numEsp < semanaCalendario;
+        const esAdelanto = numEsp > semanaCalendario;
+
+        let efRestante = Number(efectivoCredito) || 0;
+        let trRestante = Number(transferenciaCredito) || 0;
+        let tjRestante = Number(tarjetaCredito) || 0;
+        let dpRestante = Number(depositoCredito) || 0;
+
+        if (efRestante === 0 && trRestante === 0 && tjRestante === 0 && dpRestante === 0 && montoCreditoNum > 0) {
+            if (metodoPago === 'TRANSFERENCIA') trRestante = montoCreditoNum;
+            else if (metodoPago === 'TARJETA') tjRestante = montoCreditoNum;
+            else if (metodoPago === 'DEPOSITO') dpRestante = montoCreditoNum;
+            else efRestante = montoCreditoNum;
+        }
+
+        return [{
+            numeroPago: numEsp,
+            montoPagado: montoCreditoNum,
+            efectivoCredito: efRestante,
+            transferenciaCredito: trRestante,
+            tarjetaCredito: tjRestante,
+            depositoCredito: dpRestante,
+            pagoSolidario: !!pagoSolidario,
+            montoSolidario: montoSolidarioNum,
+            efectivoSolidario,
+            transferenciaSolidario,
+            tarjetaSolidario,
+            depositoSolidario,
+            montoAhorro: montoAhorroNum,
+            efectivoAhorro,
+            transferenciaAhorro,
+            tarjetaAhorro,
+            depositoAhorro,
+            recuperacionSolidario: !!recuperacionSolidario,
+            esAdelanto,
+            esAtraso,
+            fechaPago: fechaPagoObj,
+            metodoPago: metodoPago || 'EFECTIVO',
+            numeroRecibo: numeroRecibo || null,
+            quienPrestoSolidario,
+            beneficiariosSolidarios,
+            ...(ubicacion ? { ubicacion } : {})
+        }];
+    }
+
     // Si es solidario o no hay abono a crédito o no hay pactado definido (>0):
     if (pagoSolidario || recuperacionSolidario || montoCreditoNum <= 0 || !pagoPactado || pagoPactado <= 0) {
         let numeroPago = 1;
@@ -1262,9 +1335,6 @@ function distribuirCuotasPago({
         const monto = (p.montoPagado || 0) + (p.pagoSolidario && !p.recuperacionSolidario ? (p.montoSolidario || 0) : 0);
         pagadoPorSemana[num] = (pagadoPorSemana[num] || 0) + monto;
     });
-
-    // Calcular semana calendario actual
-    const semanaCalendario = Number(calcularSemanaActual(fechaPrimerPago, frecuenciaPago || 'Semanal', fechaPagoObj)) || 1;
 
     const nuevosPagos = [];
     let restanteCredito = montoCreditoNum;
@@ -1353,7 +1423,7 @@ function distribuirCuotasPago({
     // 2. Calcular faltante de la semana actual
     const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
 
-    // A) Primero cubrimos atrasos de semanas pasadas (se registran con esAtraso = true en la casilla de la semana actual)
+    // A) Primero cubrimos atrasos de semanas pasadas (se registran en la semana actual donde se realizó el pago)
     if (deudaAtrasosPasados > 0 && restanteCredito > 0) {
         let montoParaAtrasos = Math.min(restanteCredito, deudaAtrasosPasados);
         let tempAtrasos = montoParaAtrasos;
@@ -1365,7 +1435,7 @@ function distribuirCuotasPago({
             restanteCredito -= montoCuota;
         }
 
-        // Actualizar cobertura interna de semanas anteriores
+        // Actualizar cobertura interna de semanas anteriores para control de saldos
         let tempMonto = montoParaAtrasos;
         for (let s = 1; s < semanaCalendario && tempMonto > 0; s++) {
             const pagado = pagadoPorSemana[s] || 0;
