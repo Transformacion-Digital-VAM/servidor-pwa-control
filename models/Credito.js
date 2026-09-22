@@ -27,8 +27,25 @@ const creditoSchema = new mongoose.Schema({
     saldoPendiente: { type: Number, required: true },
     estado: {
         type: String,
-        enum: ['Activo', 'Liquidado'],
+        enum: ['Activo', 'Liquidado', 'Cancelado'],
         default: 'Activo'
+    },
+    motivoCancelacion: {
+        type: String,
+        default: null
+    },
+    justificacionCancelacion: {
+        type: String,
+        default: null
+    },
+    fechaCancelacion: {
+        type: Date,
+        default: null
+    },
+    canceladoPor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Usuario',
+        required: false
     },
     saldoSolidario: {
         type: Number,

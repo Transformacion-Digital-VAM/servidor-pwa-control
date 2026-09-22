@@ -9,6 +9,7 @@ router.get('/', creditoController.obtenerCreditos); //verifyToken
 router.get('/pagos-con-ubicacion', creditoController.getPagosConUbicacion); //verifyToken — ANTES de /:id
 router.get('/:id', creditoController.obtenerCreditoPorId); //verifyToken
 router.put('/:id', creditoController.actualizarCredito); //verifyToken
+router.put('/:id/cancelar-justificado', creditoController.cancelarCreditoJustificado); //verifyToken
 router.delete('/:id', creditoController.eliminarCredito); //verifyToken
 
 // PAGOS

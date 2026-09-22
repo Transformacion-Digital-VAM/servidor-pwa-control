@@ -300,6 +300,9 @@ exports.obtenerCreditos = async (req, res) => {
                 semanaActual: 1,
                 tasaInteres: 1,
                 montoSolicitado: 1,
+                motivoCancelacion: 1,
+                justificacionCancelacion: 1,
+                fechaCancelacion: 1,
                 'pagos.numeroPago': 1,
                 'pagos.fechaPago': 1,
                 'pagos.montoPagado': 1,
@@ -317,6 +320,13 @@ exports.obtenerCreditos = async (req, res) => {
         const operacionesBulk = [];
 
         creditos.forEach(credito => {
+            // Recalcular saldo pendiente real si viene en 0 o desfasado en créditos no liquidados
+            const totalPagado = (credito.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
+            const saldoCalculado = Math.max(0, (credito.saldoTotal || 0) - totalPagado);
+            if ((credito.saldoPendiente === undefined || credito.saldoPendiente === null || credito.saldoPendiente === 0) && saldoCalculado > 0 && credito.estado !== 'Liquidado' && credito.estado !== 'Cancelado') {
+                credito.saldoPendiente = saldoCalculado;
+            }
+
             if (credito.estado === 'Activo' && credito.fechaPrimerPago) {
                 const semanaCalculada = calcularSemanaActual(credito.fechaPrimerPago, credito.frecuenciaPago || 'Semanal', hoy);
                 if (credito.semanaActual !== semanaCalculada) {
@@ -560,6 +570,65 @@ exports.eliminarCredito = async (req, res) => {
         res.status(500).json({
             ok: false,
             msg: 'Error al eliminar crédito'
+        });
+    }
+};
+
+// CANCELACIÓN JUSTIFICADA (REFILL / CAMBIO DE CICLO)
+exports.cancelarCreditoJustificado = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { motivo, justificacion, notas } = req.body;
+
+        const credito = await Credito.findById(id);
+
+        if (!credito) {
+            logWarn(req, 'CANCELAR_CREDITO_NOT_FOUND', 'Crédito no encontrado para cancelación justificada', { id });
+            return res.status(404).json({
+                ok: false,
+                msg: 'Crédito no encontrado'
+            });
+        }
+
+        const saldoAnterior = credito.saldoPendiente;
+        const motivoTexto = motivo || 'CANCELACION_REFILL';
+        const justificacionFinal = justificacion || (motivo === 'CAMBIO_CICLO' ? 'Cancelación por Cambio de Ciclo' : 'Cancelación por Refill');
+
+        credito.saldoPendiente = 0;
+        credito.estado = 'Liquidado';
+        credito.motivoCancelacion = motivoTexto;
+        credito.justificacionCancelacion = notas ? `${justificacionFinal}: ${notas}` : justificacionFinal;
+        credito.fechaCancelacion = new Date();
+
+        if (req.user && (req.user.id || req.user._id)) {
+            credito.canceladoPor = req.user.id || req.user._id;
+        }
+
+        await credito.save();
+
+        logAccion(req, 'CANCELAR_CREDITO_JUSTIFICADO', {
+            descripcion: `Crédito cancelado justificadamente (ID: ${id}) - Motivo: ${justificacionFinal} - Saldo liquidado: $${saldoAnterior}`,
+            datos: { id, motivo: motivoTexto, justificacion: justificacionFinal, saldoAnterior, notas },
+            resultado: {
+                creditoId: id,
+                estado: credito.estado,
+                saldoPendiente: credito.saldoPendiente,
+                fechaCancelacion: credito.fechaCancelacion
+            }
+        });
+
+        res.json({
+            ok: true,
+            msg: 'Crédito cancelado y saldado a $0 correctamente por justificación.',
+            credito
+        });
+
+    } catch (error) {
+        logError(req, 'CANCELAR_CREDITO_JUSTIFICADO_ERROR', error, { id: req.params.id, body: req.body });
+        res.status(500).json({
+            ok: false,
+            msg: 'Error al cancelar crédito justificadamente',
+            error: error.message
         });
     }
 };
@@ -962,13 +1031,15 @@ exports.registrarPago = async (req, res) => {
             const mismoOrigenSolidario = pagoSolidario && !recuperacionSolidario && p.quienPrestoSolidario && creditoOrigen.miembro
                 ? p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString()
                 : true;
+            const mismaNaturaleza = (!!p.recuperacionSolidario === !!recuperacionSolidario) && (!!p.pagoSolidario === !!pagoSolidario);
             return (
                 fechaPagoExistente.toDateString() === fechaPagoObj.toDateString() &&
                 p.montoPagado === montoCreditoNum &&
                 p.montoSolidario === montoSolidarioNum &&
                 p.metodoPago === (metodoPago || 'EFECTIVO') &&
                 p.montoAhorro === montoAhorroNum &&
-                mismoOrigenSolidario
+                mismoOrigenSolidario &&
+                mismaNaturaleza
             );
         });
         if (existeDuplicado) {
@@ -1031,9 +1102,9 @@ exports.registrarPago = async (req, res) => {
 
         // --- GESTIÓN DE SALDO SOLIDARIO ---
         if (recuperacionSolidario) {
-            // Si es recuperación, restamos de su deuda solidaria el monto que está pagando
-            // (Usamos abonoAlCredito que en recuperación es montoCreditoNum)
-            creditoDestino.saldoSolidario = Math.max(0, (creditoDestino.saldoSolidario || 0) - abonoAlCredito);
+            // Si es recuperación, restamos de su deuda solidaria el monto que está devolviendo
+            const montoADescontar = montoSolidarioNum > 0 ? montoSolidarioNum : (montoCreditoNum > 0 ? montoCreditoNum : abonoAlCredito);
+            creditoDestino.saldoSolidario = Math.max(0, (creditoDestino.saldoSolidario || 0) - montoADescontar);
         } else if (pagoSolidario) {
             // Si es un apoyo que recibe, aumenta su deuda solidaria
             creditoDestino.saldoSolidario = (creditoDestino.saldoSolidario || 0) + montoSolidarioNum;
