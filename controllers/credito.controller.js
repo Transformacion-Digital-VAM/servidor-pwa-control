@@ -666,7 +666,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago
+            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago, aplicaGarantia
         } = req.body;
 
         const beneficiariosSolidarios = Array.isArray(req.body.beneficiariosSolidarios)
@@ -715,9 +715,9 @@ exports.registrarPago = async (req, res) => {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_LIQUIDADO', 'Intento de abonar a crédito Individual ya liquidado', { creditoId: id, montoCreditoNum });
                 return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
             }
-            if (sumaTotal <= 0) {
+            if (sumaTotal <= 0 && !aplicaGarantia) {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_MONTO_CERO', 'Monto total ingresado es 0 o menor', { creditoId: id, body: req.body });
-                return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
+                return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0 o aplicar garantía' });
             }
 
             // --- VALIDACIÓN ANTI-DUPLICADO PARA CRÉDITO INDIVIDUAL ---
@@ -747,8 +747,6 @@ exports.registrarPago = async (req, res) => {
             }
 
             // 2. No exceder el saldo pendiente total del crédito
-            //    Se usa saldoPendiente (no pagoPactado) porque el cliente puede llegar
-            //    a pagar deudas de semanas anteriores junto con el pago actual.
             if (montoCreditoNum > creditoOrigen.saldoPendiente) {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_EXCEDE_SALDO', 'El abono excede el saldo pendiente total del crédito', {
                     creditoId: id, montoCreditoNum, saldoPendiente: creditoOrigen.saldoPendiente
@@ -757,6 +755,16 @@ exports.registrarPago = async (req, res) => {
                     ok: false,
                     msg: `El monto a registrar ($${montoCreditoNum}) excede el saldo pendiente del crédito ($${creditoOrigen.saldoPendiente}).`
                 });
+            }
+
+            if (aplicaGarantia) {
+                const totalConGarantia = montoCreditoNum + (creditoOrigen.garantia || 0);
+                if (totalConGarantia < creditoOrigen.saldoPendiente) {
+                    return res.status(400).json({
+                        ok: false,
+                        msg: `La suma del pago ($${montoCreditoNum}) y la garantía ($${creditoOrigen.garantia || 0}) no son suficientes para liquidar el saldo pendiente ($${creditoOrigen.saldoPendiente}).`
+                    });
+                }
             }
 
             const saldoAnterior = creditoOrigen.saldoPendiente;
@@ -838,9 +846,69 @@ exports.registrarPago = async (req, res) => {
                 creditoOrigen.ahorro.montoTotal = (creditoOrigen.ahorro.montoTotal || 0) + montoAhorroNum;
             }
 
+            if (aplicaGarantia && creditoOrigen.saldoPendiente > 0) {
+                const montoGarantiaAplicada = Math.min(creditoOrigen.saldoPendiente, creditoOrigen.garantia || 0);
+                
+                let remainingGarantia = montoGarantiaAplicada;
+                let currentSemanaToFill = numSemana + 1;
+                const maxSemanas = creditoOrigen.semanas || 16;
+                let acumuladoParaSuma = 0;
+
+                if (currentSemanaToFill > maxSemanas) {
+                    currentSemanaToFill = maxSemanas;
+                }
+
+                while (remainingGarantia > 0) {
+                    let amtToFill = Math.min(remainingGarantia, creditoOrigen.pagoPactado || remainingGarantia);
+                    if (currentSemanaToFill >= maxSemanas) {
+                        amtToFill = remainingGarantia;
+                        currentSemanaToFill = maxSemanas;
+                    }
+
+                    acumuladoParaSuma += amtToFill;
+
+                    const pagoGarantia = {
+                        numeroPago: currentSemanaToFill,
+                        montoPagado: amtToFill,
+                        efectivoCredito: 0,
+                        transferenciaCredito: 0,
+                        tarjetaCredito: 0,
+                        depositoCredito: 0,
+                        pagoSolidario: false,
+                        montoSolidario: 0,
+                        efectivoSolidario: 0,
+                        transferenciaSolidario: 0,
+                        tarjetaSolidario: 0,
+                        depositoSolidario: 0,
+                        montoAhorro: 0,
+                        efectivoAhorro: 0,
+                        transferenciaAhorro: 0,
+                        tarjetaAhorro: 0,
+                        depositoAhorro: 0,
+                        recuperacionSolidario: false,
+                        esAdelanto: false,
+                        esAtraso: false,
+                        fechaPago: fechaPagoObj,
+                        metodoPago: 'GARANTIA',
+                        numeroRecibo: numeroRecibo || null,
+                        totalPagado: totalPagadoNuevo + acumuladoParaSuma,
+                        quienPrestoSolidario: null,
+                        beneficiariosSolidarios: []
+                    };
+                    creditoOrigen.pagos.push(pagoGarantia);
+                    remainingGarantia -= amtToFill;
+                    currentSemanaToFill++;
+                }
+
+                creditoOrigen.saldoPendiente -= montoGarantiaAplicada;
+            }
+
             if (creditoOrigen.saldoPendiente <= 0) {
                 creditoOrigen.saldoPendiente = 0;
                 creditoOrigen.estado = 'Liquidado';
+                if (aplicaGarantia) {
+                    creditoOrigen.liquidadoConGarantia = true;
+                }
             }
 
             await creditoOrigen.save();

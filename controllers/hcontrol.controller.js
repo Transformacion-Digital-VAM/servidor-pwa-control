@@ -827,6 +827,14 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         const esSoloRefill = creditosDelCiclo.length === 1 && (credito.tipoCredito === 'R' || credito.esRefill);
 
+        let nombreGrupoFinal = credito.grupoOpcional || '';
+        if (/^[0-9a-fA-F]{24}$/.test(nombreGrupoFinal)) {
+            const grupoEncontrado = await Grupo.findById(nombreGrupoFinal);
+            if (grupoEncontrado) {
+                credito.grupoOpcional = grupoEncontrado.nombre;
+            }
+        }
+
         const formatoMoneda = (num) =>
             Number(num || 0).toLocaleString('es-MX', {
                 minimumFractionDigits: 2,
@@ -937,6 +945,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                     }
                 }
 
+                const tieneGarantia = pagosProcesados ? pagosProcesados.some(p => p.numeroPago === semanaNumeroActual && p.metodoPago === 'GARANTIA') : false;
+
                 const saldoInicialRow = currentSaldo;
                 // Si está llena, restar el pago real (si existe). Si no, restar el pactado para el plan teórico.
                 const pagoParaSaldo = llena ? (foundPayment ? pagoReal : 0) : pagoPactado;
@@ -950,7 +960,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                     pago: (llena && foundPayment) ? pagoReal : (llena ? 0 : pagoPactado),
                     saldoFinal: saldoFinalRow,
                     llena: llena,
-                    found: foundPayment
+                    found: foundPayment,
+                    tieneGarantia: tieneGarantia
                 });
 
                 currentSaldo = saldoFinalRow;
@@ -971,8 +982,12 @@ exports.generarHojaControlIndividual = async (req, res) => {
             const siCell = si ? `<div class="align-money"><span>$</span> <span>${si}</span></div>` : '';
             
             let pContent = p;
-            if (row.llena && row.found && row.fechaPagoReal) {
-                pContent += ` <span style="font-size:9px; font-weight:bold; color:#1e3a8a;">(${row.fechaPagoReal})</span>`;
+            if (row.llena && row.found) {
+                if (row.tieneGarantia) {
+                    pContent += ` <span style="font-size:9px; font-weight:bold; color:#8b5cf6;">(GTIA)</span>`;
+                } else if (row.fechaPagoReal) {
+                    pContent += ` <span style="font-size:9px; font-weight:bold; color:#1e3a8a;">(${row.fechaPagoReal})</span>`;
+                }
             }
             const pCell = p ? `<div class="align-money"><span>$</span> <span>${pContent}</span></div>` : '';
 
@@ -988,6 +1003,17 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 </tr>
             `;
         });
+
+        const usoGarantia = amortizaciones.some(row => row.tieneGarantia);
+        if (credito.liquidadoConGarantia) {
+            tablaAmortizacionTbody += `
+                <tr>
+                    <td colspan="5" align="center" style="font-weight:bold; font-size:12px; padding:8px; background-color: #f3f4f6ff; color: #4b5563;">
+                        APLICACIÓN DE GARANTÍA
+                    </td>
+                </tr>
+            `;
+        }
 
         // Obtener datos cabecera
         const nombreCliente = credito.cliente
