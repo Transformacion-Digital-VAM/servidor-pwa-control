@@ -378,13 +378,13 @@ exports.generarHojaControlGrupal = async (req, res) => {
                         const fechaProgramadaObj = new Date(calendario[w].fechaObj);
                         fechaProgramadaObj.setHours(0, 0, 0, 0);
 
-                        tdBgStyle = tieneSolidario ? 'background-color: #ffedd5;' : '';
+                        tdBgStyle = tieneSolidario ? 'background-color: #ffd59eff;' : '';
 
                         if (montoPagoNormalSemana > 0) {
                             const fechaFormato = fechaSemanaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
 
                             // Generar cada línea de monto con su color correspondiente:
-                            // - ROJO para pagos atrasados (provenientes de semanas anteriores) o pagos extemporáneos.
+                            // - ROJO para pagos atrasados (provenientes de semanas anteriores).
                             // - AZUL para pagos puntuales de la semana en curso o adelantos.
                             const lineasSpan = pagosSemana.map((p, indexP) => {
                                 let montoP = p.montoPagado || 0;
@@ -398,8 +398,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                                 let colorP = '#2563eb';
 
-                                // Es atraso si viene explícitamente como esAtraso o si hay múltiples pagos en la semana donde los primeros cubren atrasos
-                                const esAtrasadoDeSemanaPasada = p.esAtraso === true || (pagosSemana.length > 1 && indexP < pagosSemana.length - 1);
+                                // Es atraso si viene explícitamente como esAtraso
+                                const esAtrasadoDeSemanaPasada = p.esAtraso === true;
 
                                 if (esAtrasadoDeSemanaPasada) {
                                     colorP = '#b91c1c'; // ROJO para el atraso
@@ -410,7 +410,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                     fPago.setMinutes(fPago.getMinutes() + fPago.getTimezoneOffset());
                                     fPago.setHours(0, 0, 0, 0);
                                     if (fPago > fechaProgramadaObj) {
-                                        colorP = '#b91c1c'; // ROJO extemporáneo
+                                        colorP = '#b91c1c'; // ROJO atraso
                                     } else {
                                         colorP = '#2563eb'; // AZUL dentro de fecha
                                     }
@@ -781,16 +781,51 @@ exports.generarHojaControlIndividual = async (req, res) => {
             .populate('miembro')
             .sort({ createdAt: -1 });
 
-        let credito = creditos.find(c => c.ciclo == ciclo);
+        let creditosDelCiclo = creditos.filter(c => c.ciclo == ciclo);
 
-        if (!credito && creditos.length > 0) {
-            // Fallback: Buscar primero un crédito Activo o el más reciente
-            credito = creditos.find(c => c.estado === 'Activo') || creditos[0];
+        if (creditosDelCiclo.length === 0) {
+            // Fallback: Buscar los créditos más recientes o activos
+            const masRec = creditos.length > 0 ? creditos[0] : null;
+            if (masRec) {
+                creditosDelCiclo = creditos.filter(c => c.ciclo == masRec.ciclo);
+            }
         }
 
-        if (!credito) {
+        if (creditosDelCiclo.length === 0) {
             return res.status(404).json({ message: "No se encontró el crédito para este cliente" });
         }
+
+        let credito;
+        if (creditosDelCiclo.length > 1) {
+            const creditoActivo = creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[0];
+            const creditoLiquidado = creditosDelCiclo.find(c => c.estado !== 'Activo');
+
+            credito = creditoActivo.toObject ? creditoActivo.toObject() : { ...creditoActivo };
+
+            if (creditoLiquidado) {
+                 const objLiquidado = creditoLiquidado.toObject ? creditoLiquidado.toObject() : { ...creditoLiquidado };
+                 
+                 // Combinar pagos
+                 const todosLosPagos = [...(objLiquidado.pagos || []), ...(credito.pagos || [])];
+                 todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+
+                 const todosPagosAhorro = [...((objLiquidado.ahorro && objLiquidado.ahorro.pagosAhorro) || []), ...((credito.ahorro && credito.ahorro.pagosAhorro) || [])];
+                 todosPagosAhorro.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+
+                 credito.pagos = todosLosPagos;
+                 if (!credito.ahorro) credito.ahorro = {};
+                 credito.ahorro.pagosAhorro = todosPagosAhorro;
+                 
+                 // Respetar la fecha de inicio original y el monto original
+                 if (objLiquidado.fechaPrimerPago) {
+                     credito.fechaPrimerPago = objLiquidado.fechaPrimerPago;
+                 }
+            }
+        } else {
+            credito = creditosDelCiclo[0];
+        }
+
+        const esSoloRefill = creditosDelCiclo.length === 1 && (credito.tipoCredito === 'R' || credito.esRefill);
 
         const formatoMoneda = (num) =>
             Number(num || 0).toLocaleString('es-MX', {
@@ -798,7 +833,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 maximumFractionDigits: 2
             });
 
-        const generarCalendario = (fechaInicio, semanasTotales, creditoActual) => {
+        const generarCalendario = (fechaInicio, semanasTotales, creditoActual, esSoloRefillFlag) => {
             const fechas = [];
             let currentSaldo = creditoActual.saldoTotal || 0;
             const pagoPactado = creditoActual.pagoPactado || 0;
@@ -815,13 +850,20 @@ exports.generarHojaControlIndividual = async (req, res) => {
             // Calcular inicio de renderizado y total de semanas a mostrar
             let semanaInicioReal = 1;
             let semanasRender = semanasTotales;
-            if (creditoActual.tipoCredito === 'R') {
+            
+            if (req.query.semanaInicio) {
+                semanaInicioReal = parseInt(req.query.semanaInicio);
+                semanasRender = 8;
+            } else if (esSoloRefillFlag) {
                 let inicioRefill = 9;
                 if (pagosProcesados && pagosProcesados.length > 0) {
                     inicioRefill = pagosProcesados[0].numeroPago || 9;
                 }
                 semanaInicioReal = inicioRefill;
                 semanasRender = 8; // Un Refill siempre genera 8 semanas de hoja de control
+            } else {
+                semanaInicioReal = 1;
+                semanasRender = semanasTotales;
             }
 
             for (let i = 0; i < semanasRender; i++) {
@@ -918,7 +960,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         const maxSemanas = credito.semanas || 16;
         const fechaBasica = credito.fechaPrimerPago || new Date();
-        const amortizaciones = generarCalendario(fechaBasica, maxSemanas, credito);
+        const amortizaciones = generarCalendario(fechaBasica, maxSemanas, credito, esSoloRefill);
 
         let tablaAmortizacionTbody = '';
         amortizaciones.forEach(row => {

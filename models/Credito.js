@@ -145,6 +145,10 @@ const creditoSchema = new mongoose.Schema({
         type: String,
         enum: ['CC', 'R', '8S'],
         required: false
+    },
+    esRefill: {
+        type: Boolean,
+        default: false
     }
 
 }, { timestamps: true });

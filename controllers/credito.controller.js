@@ -25,7 +25,8 @@ exports.crearCredito = async (req, res) => {
             porcentajeGarantia,
             equivalenciaMeses,
             plazoMeses,
-            frecuenciaPago
+            frecuenciaPago,
+            estadoGrupo
         } = req.body;
 
         const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
@@ -103,8 +104,16 @@ exports.crearCredito = async (req, res) => {
             tipoCredito
         };
 
+        let esRefillVal = false;
         if (tipoCredito === 'Individual') {
             query.cliente = cliente;
+            // Permitir "Refill" individual: buscar solo Activos para actualizar, si está Liquidado/Cancelado creará uno nuevo
+            query.estado = 'Activo';
+            
+            const creditoPrevio = await Credito.findOne({ ciclo, cliente, tipoCredito: 'Individual', estado: { $ne: 'Activo' } });
+            if (creditoPrevio) {
+                esRefillVal = true;
+            }
         } else {
             query.miembro = miembro;
         }
@@ -129,7 +138,9 @@ exports.crearCredito = async (req, res) => {
             garantiaPredial: req.body.garantiaPredial || '',
             equivalenciaMeses: meses,
             grupoOpcional: req.body.grupoOpcional || '',
-            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, frecFinal)
+            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, frecFinal),
+            estadoGrupo: estadoGrupo || req.body.estadoGrupo || null,
+            esRefill: esRefillVal
         };
 
         if (tipoCredito !== 'Individual') {
@@ -291,6 +302,7 @@ exports.obtenerCreditos = async (req, res) => {
                 cliente: 1,
                 estado: 1,
                 estadoGrupo: 1,
+                esRefill: 1,
                 semanas: 1,
                 pagoPactado: 1,
                 saldoTotal: 1,
@@ -348,10 +360,16 @@ exports.obtenerCreditos = async (req, res) => {
         let creditosParaEnviar = creditos;
         if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true') {
             const miembrosConRefillPorCiclo = new Set();
+            const clientesConIndividualActivoPorCiclo = new Set();
+            
             creditos.forEach(c => {
                 if (c.miembro && c.tipoCredito === 'R') {
                     const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
                     miembrosConRefillPorCiclo.add(`${miembroId}_${c.ciclo}`);
+                }
+                if (c.cliente && c.tipoCredito === 'Individual' && c.estado === 'Activo') {
+                    const clienteId = c.cliente._id ? c.cliente._id.toString() : c.cliente.toString();
+                    clientesConIndividualActivoPorCiclo.add(`${clienteId}_${c.ciclo}`);
                 }
             });
 
@@ -360,6 +378,12 @@ exports.obtenerCreditos = async (req, res) => {
                     const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
                     if (miembrosConRefillPorCiclo.has(`${miembroId}_${c.ciclo}`)) {
                         return false; // Omitir el CC anterior porque el R es la continuación vigente
+                    }
+                }
+                if (c.cliente && c.tipoCredito === 'Individual' && c.estado !== 'Activo') {
+                    const clienteId = c.cliente._id ? c.cliente._id.toString() : c.cliente.toString();
+                    if (clientesConIndividualActivoPorCiclo.has(`${clienteId}_${c.ciclo}`)) {
+                        return false; // Omitir el Individual liquidado si hay uno activo en el mismo ciclo
                     }
                 }
                 return true;
@@ -923,10 +947,13 @@ exports.registrarPago = async (req, res) => {
             }
 
             // Registrar el pago en el crédito de origen (el que presta)
-            const numeroPagoOrigen = (creditoOrigen.pagos || []).length + 1;
+            const semanaCalendario = Number(calcularSemanaActual(creditoOrigen.fechaPrimerPago, creditoOrigen.frecuenciaPago || 'Semanal', fechaPago ? new Date(fechaPago) : new Date())) || 1;
+            const numeroPagoNum = req.body.numeroPago ? Number(req.body.numeroPago) : null;
+            const numSemanaO = (numeroPagoNum && numeroPagoNum > 0) ? numeroPagoNum : semanaCalendario;
+
             const pagoMaster = {
-                numeroPago: numeroPagoOrigen,
-                montoPagado: 0,
+                numeroPago: numSemanaO,
+                montoPagado: montoCreditoNum,
                 efectivoCredito: efectivoCredito || 0,
                 transferenciaCredito: transferenciaCredito || 0,
                 tarjetaCredito: tarjetaCredito || 0,
@@ -1511,68 +1538,19 @@ function distribuirCuotasPago({
         }
     }
 
-    // 2. Calcular faltante de la semana actual
-    const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
+    let esAtrasoGlobal = false;
+    let esAdelantoGlobal = false;
 
-    // A) Primero cubrimos atrasos de semanas pasadas (se registran en la semana actual donde se realizó el pago)
-    if (deudaAtrasosPasados > 0 && restanteCredito > 0) {
-        let montoParaAtrasos = Math.min(restanteCredito, deudaAtrasosPasados);
-        let tempAtrasos = montoParaAtrasos;
-
-        while (tempAtrasos > 0) {
-            const montoCuota = Math.min(tempAtrasos, pagoPactado);
-            nuevosPagos.push(construirItemPago(semanaCalendario, false, true, montoCuota));
-            tempAtrasos -= montoCuota;
-            restanteCredito -= montoCuota;
-        }
-
-        // Actualizar cobertura interna de semanas anteriores para control de saldos
-        let tempMonto = montoParaAtrasos;
-        for (let s = 1; s < semanaCalendario && tempMonto > 0; s++) {
-            const pagado = pagadoPorSemana[s] || 0;
-            const falta = Math.max(0, pagoPactado - pagado);
-            if (falta > 0) {
-                const abono = Math.min(tempMonto, falta);
-                pagadoPorSemana[s] = pagado + abono;
-                tempMonto -= abono;
-            }
+    if (deudaAtrasosPasados > 0) {
+        esAtrasoGlobal = true;
+    } else {
+        const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
+        if (restanteCredito > faltaSemanaActual) {
+            esAdelantoGlobal = true;
         }
     }
 
-    // B) Luego cubrimos la cuota de la semana actual (se registra con esAtraso = false en la casilla de la semana actual)
-    if (faltaSemanaActual > 0 && restanteCredito > 0) {
-        let montoParaActual = Math.min(restanteCredito, faltaSemanaActual);
-        let tempActual = montoParaActual;
-
-        while (tempActual > 0) {
-            const montoCuota = Math.min(tempActual, pagoPactado);
-            nuevosPagos.push(construirItemPago(semanaCalendario, false, false, montoCuota));
-            tempActual -= montoCuota;
-            restanteCredito -= montoCuota;
-        }
-
-        pagadoPorSemana[semanaCalendario] = (pagadoPorSemana[semanaCalendario] || 0) + montoParaActual;
-    }
-
-    // C) Si aún queda dinero restante, es un ADELANTO para semanas futuras (se registra con esAdelanto = true, esAtraso = false)
-    if (restanteCredito > 0) {
-        let semanaFutura = semanaCalendario + 1;
-        while (pagadoPorSemana[semanaFutura] && pagadoPorSemana[semanaFutura] >= pagoPactado) {
-            semanaFutura++;
-        }
-
-        while (restanteCredito > 0) {
-            const pagadoActual = pagadoPorSemana[semanaFutura] || 0;
-            const faltaSemana = Math.max(0, pagoPactado - pagadoActual);
-            const montoCuota = faltaSemana > 0 ? Math.min(restanteCredito, faltaSemana) : Math.min(restanteCredito, pagoPactado);
-
-            nuevosPagos.push(construirItemPago(semanaFutura, true, false, montoCuota));
-
-            pagadoPorSemana[semanaFutura] = (pagadoPorSemana[semanaFutura] || 0) + montoCuota;
-            restanteCredito -= montoCuota;
-            semanaFutura++;
-        }
-    }
+    nuevosPagos.push(construirItemPago(semanaCalendario, esAdelantoGlobal, esAtrasoGlobal, restanteCredito));
 
     return nuevosPagos;
 }
