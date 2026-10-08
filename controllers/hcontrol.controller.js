@@ -989,6 +989,14 @@ exports.generarHojaControlIndividual = async (req, res) => {
             `;
         });
 
+        if (credito.garantiaAplicada) {
+            tablaAmortizacionTbody += `
+                <tr>
+                    <td colspan="5" align="center" style="font-weight:bold; font-size:12px; color: #05152cffff; background-color: #dae1ffff; padding: 8px 0; border-top: 1px solid #000; text-transform: uppercase;">APLICACIÓN DE GARANTÍA</td>
+                </tr>
+            `;
+        }
+
         // Obtener datos cabecera
         const nombreCliente = credito.cliente
             ? (credito.cliente.nombre + (credito.cliente.apellidos ? ` ${credito.cliente.apellidos}` : ""))
@@ -1057,6 +1065,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
             ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
             : "________________";
         const asesorNombre = asesorStr.toUpperCase();
+
+
 
         const templatePath = path.join(__dirname, '../templates/hojaControlIndividual.html');
         let htmlCompleto = fs.readFileSync(templatePath, 'utf8');

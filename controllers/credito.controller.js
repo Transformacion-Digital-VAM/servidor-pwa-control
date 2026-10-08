@@ -315,6 +315,9 @@ exports.obtenerCreditos = async (req, res) => {
                 motivoCancelacion: 1,
                 justificacionCancelacion: 1,
                 fechaCancelacion: 1,
+                garantia: 1,
+                liquidadoConGarantia: 1,
+                garantiaAplicada: 1,
                 'pagos.numeroPago': 1,
                 'pagos.fechaPago': 1,
                 'pagos.montoPagado': 1,
@@ -323,7 +326,10 @@ exports.obtenerCreditos = async (req, res) => {
                 'pagos.quienPrestoSolidario': 1,
                 'pagos.recuperacionSolidario': 1,
                 'pagos.metodoPago': 1,
-                'pagos.numeroRecibo': 1
+                'pagos.numeroRecibo': 1,
+                'pagos.montoAhorro':1,
+                'pagos.aplicaGarantia': 1,
+                'pagos.montoGarantia': 1
             })
             .sort({ ciclo: -1, createdAt: -1 })
             .lean();
@@ -333,7 +339,7 @@ exports.obtenerCreditos = async (req, res) => {
 
         creditos.forEach(credito => {
             // Recalcular saldo pendiente real si viene en 0 o desfasado en créditos no liquidados
-            const totalPagado = (credito.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
+            const totalPagado = (credito.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0) + (p.montoGarantia || 0), 0);
             const saldoCalculado = Math.max(0, (credito.saldoTotal || 0) - totalPagado);
             if ((credito.saldoPendiente === undefined || credito.saldoPendiente === null || credito.saldoPendiente === 0) && saldoCalculado > 0 && credito.estado !== 'Liquidado' && credito.estado !== 'Cancelado') {
                 credito.saldoPendiente = saldoCalculado;
@@ -666,7 +672,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago
+            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago, aplicaGarantia
         } = req.body;
 
         const beneficiariosSolidarios = Array.isArray(req.body.beneficiariosSolidarios)
@@ -715,7 +721,33 @@ exports.registrarPago = async (req, res) => {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_LIQUIDADO', 'Intento de abonar a crédito Individual ya liquidado', { creditoId: id, montoCreditoNum });
                 return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
             }
-            if (sumaTotal <= 0) {
+            // --- APLICACIÓN DE GARANTÍA PARA LIQUIDAR (solo crédito Individual activo) ---
+            // La garantía cubre lo que falte del saldo pendiente después del abono en dinero.
+            const usarGarantia = aplicaGarantia === true || aplicaGarantia === 'true';
+            let montoGarantiaNum = 0;
+            if (usarGarantia) {
+                if (creditoOrigen.estado !== 'Activo') {
+                    logWarn(req, 'APLICAR_GARANTIA_CREDITO_NO_ACTIVO', 'Intento de aplicar garantía a crédito no activo', { creditoId: id, estado: creditoOrigen.estado });
+                    return res.status(400).json({ ok: false, msg: 'Solo se puede aplicar la garantía a un crédito activo' });
+                }
+                const garantiaDisponible = Number(creditoOrigen.garantia) || 0;
+                const faltanteParaLiquidar = Math.max(0, (Number(creditoOrigen.saldoPendiente) || 0) - montoCreditoNum);
+
+                if (faltanteParaLiquidar <= 0) {
+                    logWarn(req, 'APLICAR_GARANTIA_INNECESARIA', 'El abono ya liquida el crédito, no se requiere garantía', { creditoId: id, montoCreditoNum });
+                    return res.status(400).json({ ok: false, msg: 'El monto ingresado ya liquida el crédito; desmarca "Aplicar Garantía".' });
+                }
+                if (garantiaDisponible < faltanteParaLiquidar) {
+                    logWarn(req, 'APLICAR_GARANTIA_INSUFICIENTE', 'Garantía insuficiente para liquidar', { creditoId: id, garantiaDisponible, faltanteParaLiquidar });
+                    return res.status(400).json({
+                        ok: false,
+                        msg: `La garantía disponible ($${garantiaDisponible}) no alcanza para liquidar el faltante ($${faltanteParaLiquidar}). Completa la diferencia ($${faltanteParaLiquidar - garantiaDisponible}) con otro método de pago.`
+                    });
+                }
+                montoGarantiaNum = faltanteParaLiquidar;
+            }
+
+            if (sumaTotal + montoGarantiaNum <= 0) {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_MONTO_CERO', 'Monto total ingresado es 0 o menor', { creditoId: id, body: req.body });
                 return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
             }
@@ -784,13 +816,14 @@ exports.registrarPago = async (req, res) => {
             } else if (trRestante > 0) cuotaMetodo = 'TRANSFERENCIA';
             else if (tjRestante > 0) cuotaMetodo = 'TARJETA';
             else if (dpRestante > 0) cuotaMetodo = 'DEPOSITO';
+            else if (montoGarantiaNum > 0 && montoCreditoNum <= 0) cuotaMetodo = 'GARANTIA';
             else cuotaMetodo = 'EFECTIVO';
 
             const esAtraso = numSemana < semanaCalendario;
             const esAdelanto = numSemana > semanaCalendario;
 
-            let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
-            const totalPagadoNuevo = totalHistInd + montoCreditoNum + (montoSolidarioNum || 0);
+            let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0) + (p.montoGarantia || 0), 0);
+            const totalPagadoNuevo = totalHistInd + montoCreditoNum + (montoSolidarioNum || 0) + montoGarantiaNum;
 
             const nuevoPago = {
                 numeroPago: numSemana,
@@ -811,6 +844,8 @@ exports.registrarPago = async (req, res) => {
                 tarjetaAhorro: tarjetaAhorro || 0,
                 depositoAhorro: depositoAhorro || 0,
                 recuperacionSolidario: !!recuperacionSolidario,
+                aplicaGarantia: montoGarantiaNum > 0,
+                montoGarantia: montoGarantiaNum,
                 esAdelanto,
                 esAtraso,
                 fechaPago: fechaPagoObj,
@@ -824,6 +859,15 @@ exports.registrarPago = async (req, res) => {
 
             creditoOrigen.pagos.push(nuevoPago);
             creditoOrigen.saldoPendiente -= montoCreditoNum;
+
+            // Descontar de la garantía del crédito activo el monto usado para liquidar
+            const garantiaAnterior = Number(creditoOrigen.garantia) || 0;
+            if (montoGarantiaNum > 0) {
+                creditoOrigen.saldoPendiente -= montoGarantiaNum;
+                creditoOrigen.garantia = Math.max(0, garantiaAnterior - montoGarantiaNum);
+                creditoOrigen.garantiaAplicada = (Number(creditoOrigen.garantiaAplicada) || 0) + montoGarantiaNum;
+                creditoOrigen.liquidadoConGarantia = true;
+            }
 
             // Actualizar saldo solidario si aplica (Individual)
             if (pagoSolidario) {
@@ -846,12 +890,14 @@ exports.registrarPago = async (req, res) => {
             await creditoOrigen.save();
 
             logAccion(req, 'REGISTRAR_PAGO_INDIVIDUAL', {
-                descripcion: `Pago Individual #${numSemana} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum})`,
-                datos: { creditoId: id, montoCreditoNum, montoAhorroNum, metodoPago, numeroRecibo },
+                descripcion: `Pago Individual #${numSemana} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum}${montoGarantiaNum > 0 ? `, Garantía aplicada: $${montoGarantiaNum}` : ''})`,
+                datos: { creditoId: id, montoCreditoNum, montoAhorroNum, montoGarantiaNum, metodoPago, numeroRecibo },
                 resultado: {
                     numerosPago: `${numSemana}`,
                     saldoAnterior,
                     nuevoSaldo: creditoOrigen.saldoPendiente,
+                    garantiaAnterior,
+                    garantiaRestante: creditoOrigen.garantia,
                     estado: creditoOrigen.estado,
                     totalPagosEnCredito: creditoOrigen.pagos.length
                 }
@@ -859,7 +905,9 @@ exports.registrarPago = async (req, res) => {
 
             return res.json({
                 ok: true,
-                msg: 'Pago registrado correctamente (Individual)',
+                msg: montoGarantiaNum > 0
+                    ? `Crédito liquidado aplicando $${montoGarantiaNum} de garantía`
+                    : 'Pago registrado correctamente (Individual)',
                 credito: creditoOrigen
             });
         }

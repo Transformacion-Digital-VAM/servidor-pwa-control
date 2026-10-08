@@ -79,7 +79,7 @@ const creditoSchema = new mongoose.Schema({
         fechaPago: { type: Date, default: Date.now },
         metodoPago: {
             type: String,
-            enum: ['EFECTIVO', 'TRANSFERENCIA', 'DEPOSITO', 'TARJETA', 'MIXTO'],
+            enum: ['EFECTIVO', 'TRANSFERENCIA', 'DEPOSITO', 'TARJETA', 'MIXTO', 'GARANTIA'],
             required: true
         },
         totalPagado: { type: Number, required: true },
@@ -113,6 +113,9 @@ const creditoSchema = new mongoose.Schema({
             type: Boolean,
             default: false
         },
+        // 4. APLICACIÓN DE GARANTÍA (monto tomado de la garantía para liquidar)
+        aplicaGarantia: { type: Boolean, default: false },
+        montoGarantia: { type: Number, default: 0 },
         numeroRecibo: { type: Number, required: false },
         ubicacion: {
             latitud: { type: Number, required: false },
@@ -120,6 +123,14 @@ const creditoSchema = new mongoose.Schema({
         }
     }],
     garantia: {
+        type: Number,
+        default: 0
+    },
+    liquidadoConGarantia: {
+        type: Boolean,
+        default: false
+    },
+    garantiaAplicada: {
         type: Number,
         default: 0
     },
