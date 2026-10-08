@@ -1010,12 +1010,20 @@ exports.generarHojaControlIndividual = async (req, res) => {
         const tasaInteres = (credito.tasaInteres || 0);
         const periodoPago = (credito.frecuenciaPago || "SEMANAL").toUpperCase();
 
+        let nombreGrupoDisplay = credito.grupoOpcional;
+        if (credito.grupoOpcional && /^[0-9a-fA-F]{24}$/.test(credito.grupoOpcional.trim())) {
+            const grupoAsociado = await Grupo.findById(credito.grupoOpcional.trim());
+            if (grupoAsociado) {
+                nombreGrupoDisplay = grupoAsociado.nombre;
+            }
+        }
+
         let grupoOpcionalHtml = '';
-        if (credito.grupoOpcional && credito.grupoOpcional.trim() !== '') {
+        if (nombreGrupoDisplay && nombreGrupoDisplay.trim() !== '') {
             grupoOpcionalHtml = `
                 <div style="display: flex; margin-bottom: 5px;">
                     <div style="width: 150px; text-align: right; padding-right: 10px;">GRUPO:</div>
-                    <div style="font-weight: normal; text-transform: uppercase;">${credito.grupoOpcional}</div>
+                    <div style="font-weight: normal; text-transform: uppercase;">${nombreGrupoDisplay}</div>
                 </div>`;
         }
 
