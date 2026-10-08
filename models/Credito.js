@@ -149,10 +149,6 @@ const creditoSchema = new mongoose.Schema({
     esRefill: {
         type: Boolean,
         default: false
-    },
-    liquidadoConGarantia: {
-        type: Boolean,
-        default: false
     }
 
 }, { timestamps: true });
