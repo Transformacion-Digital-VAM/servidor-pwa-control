@@ -52,12 +52,12 @@ exports.crearCredito = async (req, res) => {
 
         // Validar semanas
         let numSemanas = 16;
-        if (tipoCredito === '8S') {
+        if (semanas && Number(semanas) > 0) {
+            numSemanas = Number(semanas);
+        } else if (tipoCredito === '8S') {
             numSemanas = 8;
         } else if (tipoCredito === 'R') {
             numSemanas = 16;
-        } else if (semanas) {
-            numSemanas = Number(semanas);
         }
 
         // Equivalencia de meses tomada directamente del frontend (o por defecto 4)
@@ -111,7 +111,7 @@ exports.crearCredito = async (req, res) => {
             query.estado = 'Activo';
             
             const creditoPrevio = await Credito.findOne({ ciclo, cliente, tipoCredito: 'Individual', estado: { $ne: 'Activo' } });
-            if (creditoPrevio) {
+            if (creditoPrevio || estadoGrupo === 'R' || req.body.estadoGrupo === 'R') {
                 esRefillVal = true;
             }
         } else {
@@ -195,7 +195,27 @@ exports.obtenerCreditos = async (req, res) => {
         const user = req.user;
 
         // 1. Filtrado por rol del usuario o por parámetros de búsqueda
-        if (req.query.asesor && req.query.asesor !== 'todos') {
+        if (req.query.cliente) {
+            const clId = req.query.cliente;
+            const clIdObj = mongoose.Types.ObjectId.isValid(clId) ? new mongoose.Types.ObjectId(clId) : clId;
+            query = {
+                $or: [
+                    { cliente: clId },
+                    ...(mongoose.Types.ObjectId.isValid(clId) ? [{ cliente: clIdObj }] : [])
+                ]
+            };
+        } else if (req.query.tipoCredito === 'Individual') {
+            if (req.query.asesor && req.query.asesor !== 'todos') {
+                const aId = req.query.asesor;
+                const clientesAsesor = await Cliente.find({ asesor: aId }).select('_id').lean();
+                query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
+            } else if (user && user.role && (user.role.toLowerCase() === 'asesor' || (user.role.toLowerCase() === 'master' && req.query.todos !== 'true' && req.query.admin !== 'true'))) {
+                const clientesAsesor = await Cliente.find({ asesor: user.id }).select('_id').lean();
+                query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
+            } else {
+                query = { tipoCredito: 'Individual' };
+            }
+        } else if (req.query.asesor && req.query.asesor !== 'todos') {
             const aId = req.query.asesor;
             const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
             const [gruposAsesor, clientesAsesor] = await Promise.all([
@@ -242,7 +262,7 @@ exports.obtenerCreditos = async (req, res) => {
             };
         } else if (user && user.role) {
             const role = user.role.toLowerCase();
-            if (role === 'asesor') {
+            if (role === 'asesor' || (role === 'master' && req.query.todos !== 'true' && req.query.admin !== 'true')) {
                 const userId = user.id;
                 const asesorIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
 
@@ -364,7 +384,7 @@ exports.obtenerCreditos = async (req, res) => {
         }
 
         let creditosParaEnviar = creditos;
-        if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true') {
+        if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true' && !req.query.cliente) {
             const miembrosConRefillPorCiclo = new Set();
             const clientesConIndividualActivoPorCiclo = new Set();
             
@@ -1742,21 +1762,29 @@ function consolidarPagosIndividual(pagos = []) {
 
         const fecha1 = p1.fechaPago ? new Date(p1.fechaPago) : null;
         const recibo1 = p1.numeroRecibo ? Number(p1.numeroRecibo) : null;
+        const esSol1 = p1.pagoSolidario === true || (Number(p1.montoSolidario) > 0);
 
-        if (recibo1 && recibo1 > 0 && fecha1) {
+        if (fecha1) {
             for (let j = i + 1; j < pagos.length; j++) {
                 if (visitados.has(j)) continue;
                 const p2 = pagos[j];
-                const recibo2 = p2.numeroRecibo ? Number(p2.numeroRecibo) : null;
                 const fecha2 = p2.fechaPago ? new Date(p2.fechaPago) : null;
+                if (!fecha2) continue;
 
-                if (recibo1 === recibo2 && fecha2) {
-                    const difMs = Math.abs(fecha1.getTime() - fecha2.getTime());
-                    const mismoDia = fecha1.toDateString() === fecha2.toDateString();
-                    if (mismoDia || difMs < 10 * 60 * 1000) {
-                        grupo.push(p2);
-                        visitados.add(j);
-                    }
+                const difMs = Math.abs(fecha1.getTime() - fecha2.getTime());
+                const mismoDia = fecha1.toDateString() === fecha2.toDateString();
+
+                // Caso A: Mismo número de recibo en el mismo día o con diferencia < 10 min
+                const recibo2 = p2.numeroRecibo ? Number(p2.numeroRecibo) : null;
+                const matchRecibo = recibo1 && recibo1 > 0 && recibo1 === recibo2 && (mismoDia || difMs < 10 * 60 * 1000);
+
+                // Caso B: Pagos solidarios en la misma fecha y mismo número de pago
+                const esSol2 = p2.pagoSolidario === true || (Number(p2.montoSolidario) > 0);
+                const matchSolidario = esSol1 && esSol2 && Number(p1.numeroPago) === Number(p2.numeroPago) && mismoDia;
+
+                if (matchRecibo || matchSolidario) {
+                    grupo.push(p2);
+                    visitados.add(j);
                 }
             }
         }
@@ -1793,6 +1821,7 @@ function consolidarPagosIndividual(pagos = []) {
                 depositoCredito: depositoTotal,
                 montoAhorro: ahorroTotal,
                 montoSolidario: solidarioTotal,
+                pagoSolidario: grupo.some(g => g.pagoSolidario === true || (Number(g.montoSolidario) > 0)),
                 metodoPago: metodoFinal,
                 esAdelanto: grupo.every(g => g.esAdelanto),
                 esAtraso: grupo.some(g => g.esAtraso && !g.esAdelanto),

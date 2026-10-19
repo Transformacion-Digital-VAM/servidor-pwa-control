@@ -35,4 +35,7 @@ const grupoSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+grupoSchema.index({ asesor: 1 });
+grupoSchema.index({ coordinacion: 1 });
+
 module.exports = mongoose.model('Grupo', grupoSchema);

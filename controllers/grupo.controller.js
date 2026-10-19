@@ -68,7 +68,7 @@ exports.getGrupos = async (req, res) => {
         // Si es admin o master, query = {} (ve todo)
 
         const grupos = await Grupo.find(query)
-            .populate('asesor', 'username nombre')
+            .populate('asesor', 'username nombre coordinacion')
             .populate('coordinacion', 'nombre')
             .populate('integrantes')
             .lean();

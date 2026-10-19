@@ -34,4 +34,8 @@ const clienteSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+clienteSchema.index({ asesor: 1 });
+clienteSchema.index({ coordinacion: 1 });
+clienteSchema.index({ nombre: 1 });
+
 module.exports = mongoose.model('Cliente', clienteSchema);

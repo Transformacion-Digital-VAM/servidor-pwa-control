@@ -19,4 +19,6 @@ const miembroSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+miembroSchema.index({ grupo: 1 });
+
 module.exports = mongoose.model('Miembro', miembroSchema);
