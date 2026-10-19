@@ -209,7 +209,7 @@ exports.obtenerCreditos = async (req, res) => {
                 const aId = req.query.asesor;
                 const clientesAsesor = await Cliente.find({ asesor: aId }).select('_id').lean();
                 query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
-            } else if (user && user.role && (user.role.toLowerCase() === 'asesor' || (user.role.toLowerCase() === 'master' && req.query.todos !== 'true' && req.query.admin !== 'true'))) {
+            } else if (user && user.role && user.role.toLowerCase() === 'asesor') {
                 const clientesAsesor = await Cliente.find({ asesor: user.id }).select('_id').lean();
                 query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
             } else {
@@ -262,7 +262,7 @@ exports.obtenerCreditos = async (req, res) => {
             };
         } else if (user && user.role) {
             const role = user.role.toLowerCase();
-            if (role === 'asesor' || (role === 'master' && req.query.todos !== 'true' && req.query.admin !== 'true')) {
+            if (role === 'asesor') {
                 const userId = user.id;
                 const asesorIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
 

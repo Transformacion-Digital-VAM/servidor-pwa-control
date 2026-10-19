@@ -51,17 +51,10 @@ exports.getCliente = async (req, res) => {
                     ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
                 ]
             };
-        } else if (role === 'master' && req.query.todos !== 'true' && req.query.admin !== 'true') {
-            // En panel de asesor, master solo consulta sus clientes asignados
-            query = {
-                $or: [
-                    { asesor: userId },
-                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
-                ]
-            };
         } else if (role === 'coordinador' && req.user.coordinacion) {
             query = { coordinacion: req.user.coordinacion };
         }
+        // Si es admin o master, query = {} (ve todo o filtra por ?asesor= si se indica)
 
         const clientes = await Cliente.find(query)
             .select({
@@ -75,7 +68,7 @@ exports.getCliente = async (req, res) => {
                 clave: 1
             })
             .populate('coordinacion', 'nombre')
-            .populate('asesor', 'username nombre')
+            .populate('asesor', 'username nombre coordinacion')
             .lean();
 
         // Si se solicita adjuntar el crédito activo (optimización masiva: 1 sola petición)
