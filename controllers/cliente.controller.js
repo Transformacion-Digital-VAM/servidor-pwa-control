@@ -35,7 +35,14 @@ exports.getCliente = async (req, res) => {
         const userId = req.user?.id;
 
         // 1. Filtrado por asesor explícito en query o por rol
-        if (req.query.asesor && req.query.asesor !== 'todos') {
+        if (role === 'coordinador' && req.user.coordinacion) {
+            query = { coordinacion: req.user.coordinacion };
+            if (req.query.asesor && req.query.asesor !== 'todos') {
+                const aId = req.query.asesor;
+                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
+                query.asesor = aIdObj;
+            }
+        } else if (req.query.asesor && req.query.asesor !== 'todos') {
             const aId = req.query.asesor;
             const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
             query = {
@@ -51,8 +58,6 @@ exports.getCliente = async (req, res) => {
                     ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
                 ]
             };
-        } else if (role === 'coordinador' && req.user.coordinacion) {
-            query = { coordinacion: req.user.coordinacion };
         }
         // Si es admin o master, query = {} (ve todo o filtra por ?asesor= si se indica)
 

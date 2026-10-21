@@ -64,6 +64,11 @@ exports.getGrupos = async (req, res) => {
             };
         } else if (req.user && req.user.role && req.user.role.toLowerCase() === 'coordinador') {
             query = { coordinacion: req.user.coordinacion };
+            if (req.query.asesor && req.query.asesor !== 'todos') {
+                const aId = req.query.asesor;
+                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
+                query.asesor = aIdObj;
+            }
         }
         // Si es admin o master, query = {} (ve todo)
 

@@ -192,7 +192,15 @@ exports.obtenerCreditos = async (req, res) => {
     try {
         let query = {};
         const mongoose = require('mongoose');
-        const user = req.user;
+        let user = req.user;
+
+        if (!user && req.headers?.authorization) {
+            const jwt = require('jsonwebtoken');
+            const token = req.headers.authorization.split(' ')[1];
+            try {
+                user = jwt.verify(token, process.env.JWT_SECRET || 'VAM2026#00');
+            } catch (e) {}
+        }
 
         // 1. Filtrado por rol del usuario o por parámetros de búsqueda
         if (req.query.cliente) {
@@ -202,6 +210,32 @@ exports.obtenerCreditos = async (req, res) => {
                 $or: [
                     { cliente: clId },
                     ...(mongoose.Types.ObjectId.isValid(clId) ? [{ cliente: clIdObj }] : [])
+                ]
+            };
+        } else if (user && user.role && user.role.toLowerCase() === 'coordinador' && user.coordinacion) {
+            const coordId = user.coordinacion;
+            const queryGrupos = { coordinacion: coordId };
+            const queryClientes = { coordinacion: coordId };
+            if (req.query.asesor && req.query.asesor !== 'todos') {
+                const aId = req.query.asesor;
+                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
+                queryGrupos.asesor = aIdObj;
+                queryClientes.asesor = aIdObj;
+            }
+            const [gruposCoord, clientesCoord] = await Promise.all([
+                Grupo.find(queryGrupos).select('_id').lean(),
+                Cliente.find(queryClientes).select('_id').lean()
+            ]);
+
+            const grupoIds = gruposCoord.map(g => g._id);
+            const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+            const miembroIds = miembros.map(m => m._id);
+            const clienteIds = clientesCoord.map(c => c._id);
+
+            query = {
+                $or: [
+                    { miembro: { $in: miembroIds } },
+                    { cliente: { $in: clienteIds } }
                 ]
             };
         } else if (req.query.tipoCredito === 'Individual') {

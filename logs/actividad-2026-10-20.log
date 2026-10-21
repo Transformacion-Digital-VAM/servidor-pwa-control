@@ -1,0 +1,7 @@
+[2026-10-20 20:28:41.232] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (656ms)
+[2026-10-20 23:14:04.819] [ALERTA] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 401 (952ms)
+[2026-10-20 23:22:00.041] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/register -> Status: 201 (382ms)
+[2026-10-20 23:52:03.068] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/register -> Status: 201 (312ms)
+[2026-10-20 23:52:30.881] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (845ms)
+[2026-10-20 23:53:01.034] [HTTP] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (840ms)
+[2026-10-21 00:08:14.119] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (436ms)

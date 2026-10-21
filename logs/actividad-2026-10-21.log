@@ -1,0 +1,1 @@
+[2026-10-21 15:33:34.112] [ALERTA] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/location -> Status: 401 (19ms)
