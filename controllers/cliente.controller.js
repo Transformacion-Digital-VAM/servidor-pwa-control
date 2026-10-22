@@ -1,6 +1,7 @@
 const Cliente = require('../models/Cliente');
 const Usuario = require('../models/User');
 const Credito = require('../models/Credito');
+const Grupo = require('../models/Grupo');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 
 exports.createCliente = async (req, res) => {
@@ -161,34 +162,86 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
         };
 
         const creditosInd = await Credito.find(creditoQuery)
-            .populate('cliente')
+            .populate({
+                path: 'cliente',
+                populate: [
+                    {
+                        path: 'asesor',
+                        select: '_id username nombre coordinacion',
+                        populate: { path: 'coordinacion', select: '_id nombre' }
+                    },
+                    { path: 'coordinacion', select: '_id nombre' }
+                ]
+            })
             .lean();
 
         // Filtrar solo aquellos cuyo cliente tenga un grupo asignado (no vacío ni N/A)
-        const resultado = creditosInd
+        const creditosFiltrados = creditosInd
             .filter(c => {
                 const cliente = c.cliente;
                 if (!cliente) return false;
-                if (!cliente.grupo || cliente.grupo.trim() === '' || cliente.grupo.trim().toUpperCase() === 'N/A') return false;
-                if (grupoId) return cliente.grupo.trim().toUpperCase() === grupoId.trim().toUpperCase();
+                if (!cliente.grupo || cliente.grupo.trim() === '' || cliente.grupo.trim().toUpperCase() === 'N/A' || cliente.grupo.trim().toUpperCase() === "N/A C.C.") return false;
                 return true;
+            });
+
+        // Detectar si algún cliente tiene un ObjectId en el campo grupo para buscar su nombre
+        const grupoIds = [];
+        for (const c of creditosFiltrados) {
+            const g = c.cliente?.grupo?.trim();
+            if (g && /^[0-9a-fA-F]{24}$/.test(g)) {
+                grupoIds.push(g);
+            }
+        }
+
+        const gruposMap = new Map();
+        if (grupoIds.length > 0) {
+            const gruposDocs = await Grupo.find({ _id: { $in: grupoIds } }).select('_id nombre').lean();
+            for (const gr of gruposDocs) {
+                gruposMap.set(String(gr._id), gr.nombre);
+            }
+        }
+
+        const resultado = creditosFiltrados
+            .filter(c => {
+                if (!grupoId) return true;
+                const cliente = c.cliente;
+                const grupoRaw = cliente.grupo?.trim() || '';
+                const nombreGrupo = gruposMap.get(grupoRaw) || grupoRaw;
+                const target = grupoId.trim().toUpperCase();
+                return grupoRaw.toUpperCase() === target || nombreGrupo.toUpperCase() === target;
             })
-            .map(c => ({
-                _id: c.cliente._id,
-                nombre: c.cliente.nombre,
-                grupo: c.cliente.grupo,
-                diaPago: c.cliente.diaPago,
-                tipoPago: c.cliente.tipoPago,
-                creditoIndividual: {
-                    _id: c._id,
-                    ciclo: c.ciclo,
-                    semanaActual: c.semanaActual,
-                    montoSolicitado: c.montoSolicitado,
-                    pagoPactado: c.pagoPactado,
-                    saldoPendiente: c.saldoPendiente,
-                    estado: c.estado
-                }
-            }));
+            .map(c => {
+                const cliente = c.cliente;
+                const coord = cliente.coordinacion || cliente.asesor?.coordinacion || null;
+                const asesor = cliente.asesor ? {
+                    _id: cliente.asesor._id,
+                    username: cliente.asesor.username,
+                    nombre: cliente.asesor.nombre,
+                    coordinacion: cliente.asesor.coordinacion ? (cliente.asesor.coordinacion._id || cliente.asesor.coordinacion) : null
+                } : null;
+
+                const grupoRaw = cliente.grupo?.trim() || '';
+                const nombreGrupo = gruposMap.get(grupoRaw) || grupoRaw;
+
+                return {
+                    _id: cliente._id,
+                    nombre: cliente.nombre,
+                    grupo: nombreGrupo,
+                    diaPago: cliente.diaPago,
+                    tipoPago: cliente.tipoPago,
+                    asesor: asesor,
+                    coordinacion: coord,
+                    creditoIndividual: {
+                        _id: c._id,
+                        ciclo: c.ciclo,
+                        semanaActual: c.semanaActual,
+                        montoSolicitado: c.montoSolicitado,
+                        pagoPactado: c.pagoPactado,
+                        saldoPendiente: c.saldoPendiente,
+                        estado: c.estado
+                    }
+                };
+            });
 
         return res.status(200).json({
             success: true,
