@@ -4,6 +4,7 @@ const Grupo = require('../models/Grupo');
 const Cliente = require('../models/Cliente');
 const { consolidarPagosIndividual } = require('./credito.controller');
 const puppeteer = require('puppeteer');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,7 +28,7 @@ const getBrowser = async () => {
             ]
         };
 
-        
+
         const possibleCacheDirs = [
             path.join(process.cwd(), '.puppeteer-cache'),
             process.env.PUPPETEER_CACHE_DIR,
@@ -368,7 +369,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             const prestoIdStr = p.quienPrestoSolidario.toString ? p.quienPrestoSolidario.toString() : p.quienPrestoSolidario;
                             return prestoIdStr !== miembroIdStr;
                         });
-                        
+
                         // Fecha del pago de esa semana (usando el último registrado)
                         const ultimoPagoSemana = pagosSemana[pagosSemana.length - 1];
                         const fechaSemanaObj = new Date(ultimoPagoSemana.fechaPago || pagosSemana[0].fechaPago);
@@ -803,23 +804,23 @@ exports.generarHojaControlIndividual = async (req, res) => {
             credito = creditoActivo.toObject ? creditoActivo.toObject() : { ...creditoActivo };
 
             if (creditoLiquidado) {
-                 const objLiquidado = creditoLiquidado.toObject ? creditoLiquidado.toObject() : { ...creditoLiquidado };
-                 
-                 // Combinar pagos
-                 const todosLosPagos = [...(objLiquidado.pagos || []), ...(credito.pagos || [])];
-                 todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+                const objLiquidado = creditoLiquidado.toObject ? creditoLiquidado.toObject() : { ...creditoLiquidado };
 
-                 const todosPagosAhorro = [...((objLiquidado.ahorro && objLiquidado.ahorro.pagosAhorro) || []), ...((credito.ahorro && credito.ahorro.pagosAhorro) || [])];
-                 todosPagosAhorro.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+                // Combinar pagos
+                const todosLosPagos = [...(objLiquidado.pagos || []), ...(credito.pagos || [])];
+                todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
 
-                 credito.pagos = todosLosPagos;
-                 if (!credito.ahorro) credito.ahorro = {};
-                 credito.ahorro.pagosAhorro = todosPagosAhorro;
-                 
-                 // Respetar la fecha de inicio original y el monto original
-                 if (objLiquidado.fechaPrimerPago) {
-                     credito.fechaPrimerPago = objLiquidado.fechaPrimerPago;
-                 }
+                const todosPagosAhorro = [...((objLiquidado.ahorro && objLiquidado.ahorro.pagosAhorro) || []), ...((credito.ahorro && credito.ahorro.pagosAhorro) || [])];
+                todosPagosAhorro.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+
+                credito.pagos = todosLosPagos;
+                if (!credito.ahorro) credito.ahorro = {};
+                credito.ahorro.pagosAhorro = todosPagosAhorro;
+
+                // Respetar la fecha de inicio original y el monto original
+                if (objLiquidado.fechaPrimerPago) {
+                    credito.fechaPrimerPago = objLiquidado.fechaPrimerPago;
+                }
             }
         } else {
             credito = creditosDelCiclo[0];
@@ -850,7 +851,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             // Calcular inicio de renderizado y total de semanas a mostrar
             let semanaInicioReal = 1;
             let semanasRender = semanasTotales;
-            
+
             if (req.query.semanaInicio) {
                 semanaInicioReal = parseInt(req.query.semanaInicio);
                 semanasRender = 8;
@@ -969,7 +970,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             const sf = row.llena ? (row.found ? formatoMoneda(row.saldoFinal) : '') : '';
 
             const siCell = si ? `<div class="align-money"><span>$</span> <span>${si}</span></div>` : '';
-            
+
             let pContent = p;
             if (row.llena && row.found && row.fechaPagoReal) {
                 pContent += ` <span style="font-size:9px; font-weight:bold; color:#1e3a8a;">(${row.fechaPagoReal})</span>`;
@@ -1045,13 +1046,13 @@ exports.generarHojaControlIndividual = async (req, res) => {
         const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
         const baseDate = new Date(fechaBasica);
         baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
-        
+
         let diaPago = "";
-        
+
         // 1. Verificamos si el cliente tiene un día de pago registrado en BD
         if (credito.cliente && credito.cliente.diaPago) {
             const diaReg = credito.cliente.diaPago.toUpperCase().trim();
-            
+
             // Si capturaron SOLO el número (ej: "18"), le agregamos " DE CADA MES"
             if (/^\d+$/.test(diaReg)) {
                 diaPago = `${diaReg} DE CADA MES`;
@@ -1059,16 +1060,16 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 // Si ya dice "18 DE CADA MES" o "LUNES", lo dejamos tal cual
                 diaPago = diaReg;
             }
-        } 
+        }
         // 2. Si no hay nada registrado, pero la frecuencia es Mensual, lo sacamos de la fecha
         else if ((credito.frecuenciaPago || "").toUpperCase() === 'MENSUAL') {
             diaPago = `${baseDate.getDate()} DE CADA MES`;
-        } 
+        }
         // 3. Fallback: Si es semanal/quincenal y no hay registro, ponemos el día de la semana (ej. SÁBADO)
         else {
             diaPago = diasSemana[baseDate.getDay()];
         }
-        
+
         const asesorStr = credito.cliente && credito.cliente.asesor
             ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
             : "________________";

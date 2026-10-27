@@ -312,3 +312,8 @@ exports.obtenerAsesorGrupo = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 }
+
+
+// Exportar controlador para obtener grupos con miembros clientes
+const clienteController = require('./cliente.controller');
+exports.getGruposConMiembrosClientes = clienteController.getGruposConMiembrosClientes;

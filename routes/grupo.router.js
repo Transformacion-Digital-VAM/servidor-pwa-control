@@ -8,6 +8,7 @@ const { verifyToken } = require('../middlewares/auth.middleware');
 // GRUPOS
 router.post('/create', verifyToken, grupoController.createGrupo); //verifyToken
 router.get('/get', verifyToken, grupoController.getGrupos); //verifyToken
+router.get('/con-miembros-clientes', grupoController.getGruposConMiembrosClientes);
 router.get('/get/:id', verifyToken, grupoController.getGrupoById); //verifyToken
 // obtener grupos por coordinacion
 router.get('/get/coordinacion/:coordinacion', verifyToken, grupoController.getGruposPorCoordinacion); //verifyToken
