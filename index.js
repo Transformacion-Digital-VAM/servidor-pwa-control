@@ -25,11 +25,11 @@ connectDB();
 // Middleware
 app.use(cors({
   origin: [
-    'http://192.168.1.13:8080',
+    'http://192.168.1.134:8080',
     'https://pwa-hcontrol-vam.web.app',
     'http://localhost:4200',
     'http://localhost:3000',
-    '*'
+     '*'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

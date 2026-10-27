@@ -53,7 +53,7 @@ exports.loginController = async (req, res) => {
                 coordinacion: user.coordinacion
             },
             process.env.JWT_SECRET || 'VAM2026#00',
-            { expiresIn: '8h' }
+            { expiresIn: '30d' }
         );
 
         res.json({

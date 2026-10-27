@@ -3,6 +3,7 @@ const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
 const Cliente = require('../models/Cliente');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
+const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 
 /** 
  * CRUD DE CREDITOS
@@ -212,19 +213,14 @@ exports.obtenerCreditos = async (req, res) => {
                     ...(mongoose.Types.ObjectId.isValid(clId) ? [{ cliente: clIdObj }] : [])
                 ]
             };
-        } else if (user && user.role && user.role.toLowerCase() === 'coordinador' && user.coordinacion) {
-            const coordId = user.coordinacion;
-            const queryGrupos = { coordinacion: coordId };
-            const queryClientes = { coordinacion: coordId };
-            if (req.query.asesor && req.query.asesor !== 'todos') {
-                const aId = req.query.asesor;
-                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
-                queryGrupos.asesor = aIdObj;
-                queryClientes.asesor = aIdObj;
-            }
+        } else if (user && user.role && user.role.toLowerCase() === 'coordinador') {
+            const coordId = await obtenerCoordinacionId(user);
+            const filtroGrupos = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
+            const filtroClientes = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
+
             const [gruposCoord, clientesCoord] = await Promise.all([
-                Grupo.find(queryGrupos).select('_id').lean(),
-                Cliente.find(queryClientes).select('_id').lean()
+                Grupo.find(filtroGrupos).select('_id').lean(),
+                Cliente.find(filtroClientes).select('_id').lean()
             ]);
 
             const grupoIds = gruposCoord.map(g => g._id);
@@ -278,10 +274,12 @@ exports.obtenerCreditos = async (req, res) => {
                 ]
             };
         } else if (req.query.coordinacion && req.query.coordinacion !== 'todas') {
-            const coordId = req.query.coordinacion;
+            const filtroGrupos = await buildFiltroCoordinacion(req.query.coordinacion, req.query.asesor);
+            const filtroClientes = await buildFiltroCoordinacion(req.query.coordinacion, req.query.asesor);
+
             const [gruposCoord, clientesCoord] = await Promise.all([
-                Grupo.find({ coordinacion: coordId }).select('_id').lean(),
-                Cliente.find({ coordinacion: coordId }).select('_id').lean()
+                Grupo.find(filtroGrupos).select('_id').lean(),
+                Cliente.find(filtroClientes).select('_id').lean()
             ]);
             const grupoIds = gruposCoord.map(g => g._id);
             const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
@@ -326,11 +324,14 @@ exports.obtenerCreditos = async (req, res) => {
                         { cliente: { $in: clienteIds } }
                     ]
                 };
-            } else if (role === 'coordinador' && user.coordinacion) {
-                const coordId = user.coordinacion;
+            } else if (role === 'coordinador') {
+                const coordId = await obtenerCoordinacionId(user);
+                const filtroGrupos = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
+                const filtroClientes = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
+
                 const [gruposCoord, clientesCoord] = await Promise.all([
-                    Grupo.find({ coordinacion: coordId }).select('_id').lean(),
-                    Cliente.find({ coordinacion: coordId }).select('_id').lean()
+                    Grupo.find(filtroGrupos).select('_id').lean(),
+                    Cliente.find(filtroClientes).select('_id').lean()
                 ]);
 
                 const grupoIds = gruposCoord.map(g => g._id);
@@ -536,6 +537,7 @@ exports.actualizarCredito = async (req, res) => {
         const montoCambio = datosActualizar.montoSolicitado && parseFloat(datosActualizar.montoSolicitado) !== parseFloat(creditoOriginal.montoSolicitado);
         const semanaCambio = datosActualizar.semanaActual && parseInt(datosActualizar.semanaActual) !== parseInt(creditoOriginal.semanaActual || 1);
         const semanasCambio = datosActualizar.semanas && parseInt(datosActualizar.semanas) !== parseInt(creditoOriginal.semanas || 16);
+        const diaPagoCambio = datosActualizar.diaPago && parseInt(datosActualizar.diaPago) !== parseInt(creditoOriginal.diaPago || 1);
 
         // Sólo recalculamos si cambiaron el tipo o ajustaron el monto/semanas.
         const esActualizacionReal = tipoCambio || montoCambio || semanaCambio || semanasCambio;

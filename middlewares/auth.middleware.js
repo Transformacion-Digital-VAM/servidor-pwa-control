@@ -12,6 +12,7 @@ exports.verifyToken = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (error) {
-        return res.status(401).json({ mensaje: 'Token inválido o expirado' });
+        console.warn(`[AUTH] Token verification failed for ${req.method} ${req.originalUrl || req.url}:`, error.message);
+        return res.status(401).json({ mensaje: 'Token inválido o expirado', detalle: error.message });
     }
 };

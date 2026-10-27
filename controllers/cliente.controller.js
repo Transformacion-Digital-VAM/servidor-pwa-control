@@ -2,6 +2,7 @@ const Cliente = require('../models/Cliente');
 const Usuario = require('../models/User');
 const Credito = require('../models/Credito');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
+const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 
 exports.createCliente = async (req, res) => {
     try {
@@ -35,13 +36,11 @@ exports.getCliente = async (req, res) => {
         const userId = req.user?.id;
 
         // 1. Filtrado por asesor explícito en query o por rol
-        if (role === 'coordinador' && req.user.coordinacion) {
-            query = { coordinacion: req.user.coordinacion };
-            if (req.query.asesor && req.query.asesor !== 'todos') {
-                const aId = req.query.asesor;
-                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
-                query.asesor = aIdObj;
-            }
+        if (role === 'coordinador') {
+            const coordId = await obtenerCoordinacionId(req.user);
+            query = await buildFiltroCoordinacion(coordId, req.query.asesor, req.user?.id);
+        } else if (req.query.coordinacion && req.query.coordinacion !== 'todas') {
+            query = await buildFiltroCoordinacion(req.query.coordinacion, req.query.asesor);
         } else if (req.query.asesor && req.query.asesor !== 'todos') {
             const aId = req.query.asesor;
             const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;

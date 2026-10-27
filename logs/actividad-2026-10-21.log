@@ -1,1 +1,7 @@
 [2026-10-21 15:33:34.112] [ALERTA] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/location -> Status: 401 (19ms)
+[2026-10-21 22:57:14.123] [ALERTA] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/location -> Status: 401 (25ms)
+[2026-10-21 23:04:34.881] [HTTP] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (790ms)
+[2026-10-21 23:10:47.209] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (1292ms)
+[2026-10-21 23:37:55.269] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (816ms)
+[2026-10-21 23:38:32.687] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (226ms)
+[2026-10-21 23:44:46.746] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (459ms)

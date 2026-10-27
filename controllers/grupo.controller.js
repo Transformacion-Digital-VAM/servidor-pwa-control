@@ -1,6 +1,8 @@
 const Grupo = require('../models/Grupo');
 const Credito = require('../models/Credito');
+const User = require('../models/User');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
+const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 
 /**
  * Función auxiliar para extraer todos los datos del modelo Grupo
@@ -63,12 +65,8 @@ exports.getGrupos = async (req, res) => {
                 ]
             };
         } else if (req.user && req.user.role && req.user.role.toLowerCase() === 'coordinador') {
-            query = { coordinacion: req.user.coordinacion };
-            if (req.query.asesor && req.query.asesor !== 'todos') {
-                const aId = req.query.asesor;
-                const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
-                query.asesor = aIdObj;
-            }
+            const coordId = await obtenerCoordinacionId(req.user);
+            query = await buildFiltroCoordinacion(coordId, req.query.asesor, req.user.id);
         }
         // Si es admin o master, query = {} (ve todo)
 
@@ -98,14 +96,29 @@ exports.getGrupoById = async (req, res) => {
         }
 
         // Verificación de seguridad individual (por si intentan entrar por ID directo)
-        if (req.user.role === 'asesor' && grupo.asesor._id.toString() !== req.user.id) {
+        if (req.user.role === 'asesor' && grupo.asesor && grupo.asesor._id.toString() !== req.user.id) {
             logWarn(req, 'GET_GRUPO_DENEGADO', 'Asesor intentó acceder a grupo que no le corresponde', { grupoId: req.params.id, userId: req.user.id });
             return res.status(403).json({ message: "No tienes permiso para ver este grupo" });
         }
 
-        if (req.user.role === 'coordinador' && grupo.coordinacion._id.toString() !== req.user.coordinacion) {
-            logWarn(req, 'GET_GRUPO_DENEGADO', 'Coordinador intentó acceder a grupo fuera de su coordinación', { grupoId: req.params.id, userCoord: req.user.coordinacion });
-            return res.status(403).json({ message: "Este grupo no pertenece a tu coordinación" });
+        if (req.user.role === 'coordinador') {
+            const coordId = await obtenerCoordinacionId(req.user);
+            const userCoordStr = coordId ? coordId.toString() : '';
+            const grupoCoordStr = grupo.coordinacion?._id ? grupo.coordinacion._id.toString() : (grupo.coordinacion ? grupo.coordinacion.toString() : '');
+
+            let pertenece = (grupoCoordStr && grupoCoordStr === userCoordStr);
+            if (!pertenece && grupo.asesor) {
+                const asesorId = grupo.asesor._id || grupo.asesor;
+                const asesorDoc = await User.findById(asesorId).select('coordinacion').lean();
+                if (asesorDoc && asesorDoc.coordinacion && asesorDoc.coordinacion.toString() === userCoordStr) {
+                    pertenece = true;
+                }
+            }
+
+            if (!pertenece) {
+                logWarn(req, 'GET_GRUPO_DENEGADO', 'Coordinador intentó acceder a grupo fuera de su coordinación', { grupoId: req.params.id, userCoord: userCoordStr });
+                return res.status(403).json({ message: "Este grupo no pertenece a tu coordinación" });
+            }
         }
 
         res.status(200).json(grupo);
@@ -118,7 +131,8 @@ exports.getGrupoById = async (req, res) => {
 exports.getGruposPorCoordinacion = async (req, res) => {
     try {
         const { coordinacion } = req.params;
-        const grupos = await Grupo.find({ coordinacion: coordinacion })
+        const query = await buildFiltroCoordinacion(coordinacion);
+        const grupos = await Grupo.find(query)
             .populate('asesor', 'username nombre')
             .populate('coordinacion', 'nombre')
             .populate('integrantes');

@@ -1,6 +1,7 @@
 const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
+const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 
 /**
  * Función auxiliar para extraer todos los datos del modelo Grupo
@@ -97,9 +98,10 @@ exports.getMiembros = async (req, res) => {
                 }).select('_id').lean();
                 const grupoIds = gruposAsesor.map(g => g._id);
                 query = { grupo: { $in: grupoIds } };
-            } else if (role === 'coordinador' && user.coordinacion) {
-                const coordId = user.coordinacion;
-                const gruposCoord = await Grupo.find({ coordinacion: coordId }).select('_id').lean();
+            } else if (role === 'coordinador') {
+                const coordId = await obtenerCoordinacionId(user);
+                const filtroGrupos = await buildFiltroCoordinacion(coordId, null, user.id);
+                const gruposCoord = await Grupo.find(filtroGrupos).select('_id').lean();
                 const grupoIds = gruposCoord.map(g => g._id);
                 query = { grupo: { $in: grupoIds } };
             }
