@@ -503,7 +503,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const logoUrl = "https://static.wixstatic.com/media/0bf950_155f8cd81f6d4fe5ac3419b8e0397b40~mv2.png/v1/crop/x_0,y_260,w_6000,h_2480/fill/w_508,h_210,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/LOGO%20SIN%20FONDO%20OFICIAL.png";
 
         // Preprocesar datos de cada miembro y todas sus celdas semanales
-        const miembrosData = creditos.map((credito, index) => {
+        let miembrosData = creditos.map((credito, index) => {
             const nombreCliente = credito.cliente
                 ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
                 : credito.miembro
@@ -518,10 +518,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
             let cargo = "INTEGRANTE";
             if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
             const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
-
-            sumaPagoPactado += pagoPactado;
-            sumaSaldoTotal += saldoTotal;
-            sumaGarantiaInicial += garantiaInicial;
 
             const celdasPagos = [];
             const ahorrosSemana = new Array(maxSemanas).fill(0);
@@ -722,8 +718,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                         ${lineasSpan}
                                       </div>`;
                         }
-
-                        sumasSemanalesMod[w] += montoPagoNormalSemana;
                     }
                 }
 
@@ -773,7 +767,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                     if (montoSemana > 0) {
                         ahorrosSemana[w] = montoSemana;
-                        sumIncrementoSemanas[w] += montoSemana;
                     }
                 }
 
@@ -798,7 +791,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     }
                     if (montoAportadoPorElMiembro > 0) {
                         solidariosSemana[w] = montoAportadoPorElMiembro;
-                        sumSolidariosSemanas[w] += montoAportadoPorElMiembro;
                     }
                 }
             }
@@ -856,6 +848,27 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 totalSolidariosParte2,
                 totalSolidariosGlobal
             };
+        });
+
+        // Filtrar miembros para que no muestre los que tengan 0.0 (o saldo <= 0) en la última columna de S.F.
+        miembrosData = miembrosData.filter(m => {
+            const sfFinal = (m.credito && m.credito.saldoPendiente !== undefined && m.credito.saldoPendiente !== null)
+                ? Number(m.credito.saldoPendiente)
+                : Number(m.saldoFinParte2 !== undefined ? m.saldoFinParte2 : 0);
+            return Math.round(sfFinal * 100) / 100 > 0;
+        });
+
+        // Totales acumulados únicamente de los miembros visibles
+        miembrosData.forEach(m => {
+            sumaPagoPactado += m.pagoPactado;
+            sumaSaldoTotal += m.saldoTotal;
+            sumaGarantiaInicial += m.garantiaInicial;
+
+            for (let w = 0; w < maxSemanas; w++) {
+                sumasSemanalesMod[w] += (m.celdasPagos[w] ? m.celdasPagos[w].montoPagoNormalSemana : 0);
+                sumIncrementoSemanas[w] += (m.ahorrosSemana[w] || 0);
+                sumSolidariosSemanas[w] += (m.solidariosSemana[w] || 0);
+            }
         });
 
         // Totales globales
