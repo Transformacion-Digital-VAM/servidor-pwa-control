@@ -461,20 +461,41 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const sumIncrementoSemanas = new Array(maxSemanas).fill(0);
         const sumSolidariosSemanas = new Array(maxSemanas).fill(0);
 
+        // Condicionar para no mostrar miembros que tengan 0.0 en la última columna de S.F. (saldo pendiente 0 o liquidado)
+        // para no tener que borrarlos del grupo en la base de datos
+        const calcularSaldoFinalCredito = (c) => {
+            if (c.estado === 'Liquidado' || c.estado === 'Cancelado') return 0;
+            const totalPagos = (c.pagos || []).reduce((acc, p) => acc + (Number(p.montoPagado) || 0) + (Number(p.montoSolidario) || 0) + (Number(p.montoGarantia) || 0), 0);
+            const saldoCalc = Math.max(0, (Number(c.saldoTotal) || 0) - totalPagos);
+            if (c.saldoPendiente !== undefined && c.saldoPendiente !== null) {
+                if (Number(c.saldoPendiente) === 0 && totalPagos === 0 && Number(c.saldoTotal) > 0) {
+                    return Number(c.saldoTotal);
+                } 
+                return Number(c.saldoPendiente);
+            }
+            return saldoCalc;
+        };
+
+        const hayCreditosConSaldo = creditos.some(c => calcularSaldoFinalCredito(c) > 0);
+        const creditosVisibles = hayCreditosConSaldo
+            ? creditos.filter(c => calcularSaldoFinalCredito(c) > 0)
+            : creditos;
+
         // Crédito base para fecha y frecuencia: priorizar CC o el que coincida con totalSemanasGrupo
-        const creditoBase = creditos.find(c => c.tipoCredito === 'CC' && Number(c.semanas) === totalSemanasGrupo)
-            || creditos.find(c => c.tipoCredito === 'CC')
-            || creditos.find(c => Number(c.semanas) === totalSemanasGrupo)
-            || creditos.find(c => c.tipoCredito !== 'R')
+        const creditoBase = creditosVisibles.find(c => c.tipoCredito === 'CC' && Number(c.semanas) === totalSemanasGrupo)
+            || creditosVisibles.find(c => c.tipoCredito === 'CC')
+            || creditosVisibles.find(c => Number(c.semanas) === totalSemanasGrupo)
+            || creditosVisibles.find(c => c.tipoCredito !== 'R')
+            || creditosVisibles[0]
             || creditos[0];
 
-        const fechaBasica = creditoBase?.fechaPrimerPago || creditos[0]?.fechaPrimerPago || new Date();
-        const frecGrupo = (creditoBase && creditoBase.frecuenciaPago) ? creditoBase.frecuenciaPago.toLowerCase() : ((creditos[0] && creditos[0].frecuenciaPago) ? creditos[0].frecuenciaPago.toLowerCase() : 'semanal');
+        const fechaBasica = creditoBase?.fechaPrimerPago || creditosVisibles[0]?.fechaPrimerPago || creditos[0]?.fechaPrimerPago || new Date();
+        const frecGrupo = (creditoBase && creditoBase.frecuenciaPago) ? creditoBase.frecuenciaPago.toLowerCase() : ((creditosVisibles[0] && creditosVisibles[0].frecuenciaPago) ? creditosVisibles[0].frecuenciaPago.toLowerCase() : 'semanal');
         const calendario = generarCalendario(fechaBasica, maxSemanas, semanaInicioReal, frecGrupo);
         const semanaCierreThreshold = Math.max(1, totalSemanasGrupo - 2);
 
         // Metadatos del grupo
-        const unCredito = creditos[0];
+        const unCredito = creditosVisibles[0] || creditos[0];
         const grupo = unCredito?.miembro?.grupo;
         const grupoNombre = grupo?.nombre || "INDIVIDUAL";
         const diaVisita = grupo?.diaVisita || "________________";
@@ -483,6 +504,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
         let estadoGrupoValor = req.query.estadoGrupo 
             || creditosRaw.find(c => c.estadoGrupo)?.estadoGrupo 
+            || creditosVisibles.find(c => c.estadoGrupo)?.estadoGrupo
             || creditos.find(c => c.estadoGrupo)?.estadoGrupo;
 
         if (!estadoGrupoValor) {
@@ -503,7 +525,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const logoUrl = "https://static.wixstatic.com/media/0bf950_155f8cd81f6d4fe5ac3419b8e0397b40~mv2.png/v1/crop/x_0,y_260,w_6000,h_2480/fill/w_508,h_210,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/LOGO%20SIN%20FONDO%20OFICIAL.png";
 
         // Preprocesar datos de cada miembro y todas sus celdas semanales
-        let miembrosData = creditos.map((credito, index) => {
+        const miembrosData = creditosVisibles.map((credito, index) => {
             const nombreCliente = credito.cliente
                 ? `${credito.cliente.nombre} ${credito.cliente.apellidos}`
                 : credito.miembro
@@ -518,6 +540,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
             let cargo = "INTEGRANTE";
             if (credito.miembro && credito.miembro.rol) cargo = credito.miembro.rol.toUpperCase();
             const contributorId = credito.miembro ? credito.miembro._id.toString() : null;
+
+            sumaPagoPactado += pagoPactado;
+            sumaSaldoTotal += saldoTotal;
+            sumaGarantiaInicial += garantiaInicial;
 
             const celdasPagos = [];
             const ahorrosSemana = new Array(maxSemanas).fill(0);
@@ -718,6 +744,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
                                         ${lineasSpan}
                                       </div>`;
                         }
+
+                        sumasSemanalesMod[w] += montoPagoNormalSemana;
                     }
                 }
 
@@ -767,6 +795,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
 
                     if (montoSemana > 0) {
                         ahorrosSemana[w] = montoSemana;
+                        sumIncrementoSemanas[w] += montoSemana;
                     }
                 }
 
@@ -791,6 +820,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                     }
                     if (montoAportadoPorElMiembro > 0) {
                         solidariosSemana[w] = montoAportadoPorElMiembro;
+                        sumSolidariosSemanas[w] += montoAportadoPorElMiembro;
                     }
                 }
             }
@@ -848,27 +878,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 totalSolidariosParte2,
                 totalSolidariosGlobal
             };
-        });
-
-        // Filtrar miembros para que no muestre los que tengan 0.0 (o saldo <= 0) en la última columna de S.F.
-        miembrosData = miembrosData.filter(m => {
-            const sfFinal = (m.credito && m.credito.saldoPendiente !== undefined && m.credito.saldoPendiente !== null)
-                ? Number(m.credito.saldoPendiente)
-                : Number(m.saldoFinParte2 !== undefined ? m.saldoFinParte2 : 0);
-            return Math.round(sfFinal * 100) / 100 > 0;
-        });
-
-        // Totales acumulados únicamente de los miembros visibles
-        miembrosData.forEach(m => {
-            sumaPagoPactado += m.pagoPactado;
-            sumaSaldoTotal += m.saldoTotal;
-            sumaGarantiaInicial += m.garantiaInicial;
-
-            for (let w = 0; w < maxSemanas; w++) {
-                sumasSemanalesMod[w] += (m.celdasPagos[w] ? m.celdasPagos[w].montoPagoNormalSemana : 0);
-                sumIncrementoSemanas[w] += (m.ahorrosSemana[w] || 0);
-                sumSolidariosSemanas[w] += (m.solidariosSemana[w] || 0);
-            }
         });
 
         // Totales globales
@@ -1273,7 +1282,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         await page.close();
 
         res.setHeader('Content-Type', 'application/pdf');
-        const grupoG = creditos[0]?.miembro?.grupo;
+        const grupoG = (creditosVisibles[0] || creditos[0])?.miembro?.grupo;
         const nombreG = grupoG?.nombre || "INDIVIDUAL";
         const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
         const estadoGrupoParam = (estadoGrupo && estadoGrupo !== 'N/A') ? `_${estadoGrupo}` : (req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '');
