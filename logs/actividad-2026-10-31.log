@@ -1,0 +1,3 @@
+[2026-10-31 19:33:31.748] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (218ms)
+[2026-10-31 19:33:43.716] [ERROR] [Usuario: Maria C | Rol: asesor | ID: 69d66ee16628afe1254d5fca | IP: 127.0.0.1] POST /api/users/location -> Status: 500 (218ms)
+[2026-10-31 19:34:10.228] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (264ms)

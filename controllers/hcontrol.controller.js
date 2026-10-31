@@ -241,18 +241,28 @@ exports.generarHojaControlGrupal = async (req, res) => {
     const { grupoId, ciclo } = req.params;
 
     try {
-        // 1. OBTENER MIEMBROS DEL GRUPO
-        const miembros = await Miembro.find({ grupo: grupoId });
+        // 1. OBTENER MIEMBROS DEL GRUPO (del grupo actual y registrados en sus integrantes)
+        const grupoDoc = await Grupo.findById(grupoId);
+        const grupoIntegrantesIds = (grupoDoc && Array.isArray(grupoDoc.integrantes)) ? grupoDoc.integrantes : [];
+
+        const miembros = await Miembro.find({
+            $or: [
+                { grupo: grupoId },
+                ...(grupoIntegrantesIds.length > 0 ? [{ _id: { $in: grupoIntegrantesIds } }] : [])
+            ]
+        });
         const miembrosIds = miembros.map(m => m._id);
 
         if (miembrosIds.length === 0) {
             return res.status(404).json({ message: "No se encontraron miembros para este grupo" });
         }
 
-        // 2. OBTENER CRÉDITOS PARA ESE CICLO Y MIEMBROS
+        // 2. OBTENER CRÉDITOS PARA ESE CICLO Y MIEMBROS (excluyendo cancelados)
+        const cicloNum = Number(ciclo);
         let creditosRaw = await Credito.find({
             miembro: { $in: miembrosIds },
-            ciclo: ciclo
+            $or: [{ ciclo: cicloNum }, { ciclo: String(cicloNum) }, { ciclo: ciclo }],
+            estado: { $ne: 'Cancelado' }
         })
             .populate({
                 path: 'miembro',
@@ -261,9 +271,10 @@ exports.generarHojaControlGrupal = async (req, res) => {
             .populate('cliente');
 
         if (creditosRaw.length === 0) {
-            // Fallback: Buscar los créditos más recientes o activos de estos miembros
+            // Fallback: Si no se especificó un ciclo con créditos registrados, buscar créditos no cancelados
             creditosRaw = await Credito.find({
-                miembro: { $in: miembrosIds }
+                miembro: { $in: miembrosIds },
+                estado: { $ne: 'Cancelado' }
             })
                 .sort({ ciclo: -1, createdAt: -1 })
                 .populate({
@@ -277,11 +288,12 @@ exports.generarHojaControlGrupal = async (req, res) => {
             return res.status(404).json({ message: "No se encontraron créditos para este grupo" });
         }
 
-        // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC + REFILL) ---
-        // Si un miembro tiene CC (semanas 1-8) y R (semanas 9-16), se consolidan en un único registro
-        // para que aparezca una sola vez en la hoja de control con todo el historial unificado.
+        // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC/8S + REFILL O MÚLTIPLES) ---
+        // Si un miembro tiene crédito base (CC u 8S) y Refill (R), se consolidan en un único registro
+        // para que aparezca una sola vez en la hoja de control con todo el historial unificado de pagos.
         const creditosPorMiembro = new Map();
         creditosRaw.forEach(c => {
+            if (c.estado === 'Cancelado') return;
             const mId = c.miembro ? (c.miembro._id ? c.miembro._id.toString() : c.miembro.toString()) : (c.cliente ? (c.cliente._id ? c.cliente._id.toString() : c.cliente.toString()) : c._id.toString());
             if (!creditosPorMiembro.has(mId)) {
                 creditosPorMiembro.set(mId, []);
@@ -293,42 +305,75 @@ exports.generarHojaControlGrupal = async (req, res) => {
         miembros.forEach(m => {
             const mId = m._id.toString();
             const list = creditosPorMiembro.get(mId);
-            if (!list || list.length === 0) return;
+            if (!list || list.length === 0) return; // Excluye miembros que no tienen crédito en este ciclo
 
-            const creditoR = list.find(c => c.tipoCredito === 'R');
-            const creditoCC = list.find(c => c.tipoCredito === 'CC');
+            if (list.length === 1) {
+                const c = list[0];
+                creditos.push(c.toObject ? c.toObject() : { ...c });
+            } else {
+                // Múltiples créditos en el mismo ciclo para el miembro (ej. CC + R, 8S + R, etc.)
+                const creditoR = list.find(c => c.tipoCredito === 'R' || c.esRefill);
+                const creditoBase = list.find(c => c.tipoCredito === 'CC' || c.tipoCredito === '8S') || list.find(c => c.tipoCredito !== 'R') || list[0];
 
-            if (creditoR && creditoCC) {
-                const objR = creditoR.toObject ? creditoR.toObject() : { ...creditoR };
-                const objCC = creditoCC.toObject ? creditoCC.toObject() : { ...creditoCC };
+                const objR = creditoR ? (creditoR.toObject ? creditoR.toObject() : { ...creditoR }) : null;
+                const objBase = creditoBase ? (creditoBase.toObject ? creditoBase.toObject() : { ...creditoBase }) : (list[0].toObject ? list[0].toObject() : { ...list[0] });
 
-                // Combinar pagos de semanas 1-8 (CC) y semanas 9-16 (R)
-                const todosLosPagos = [...(objCC.pagos || []), ...(objR.pagos || [])];
-                todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+                // Combinar TODOS los pagos de semanas 1-8 y 9-16 (o todos los que existan)
+                const todosLosPagos = [];
+                const todosPagosAhorro = [];
+                let sumaAhorroTotal = 0;
+                const pagosIdsVistos = new Set();
+                const ahorroIdsVistos = new Set();
 
-                const todosPagosAhorro = [
-                    ...((objCC.ahorro && objCC.ahorro.pagosAhorro) || []),
-                    ...((objR.ahorro && objR.ahorro.pagosAhorro) || [])
-                ];
+                list.forEach(c => {
+                    const obj = c.toObject ? c.toObject() : { ...c };
+                    if (Array.isArray(obj.pagos)) {
+                        obj.pagos.forEach(p => {
+                            const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                            if (!pagosIdsVistos.has(pId)) {
+                                pagosIdsVistos.add(pId);
+                                todosLosPagos.push(p);
+                            }
+                        });
+                    }
+                    if (obj.ahorro) {
+                        if (Array.isArray(obj.ahorro.pagosAhorro)) {
+                            obj.ahorro.pagosAhorro.forEach(a => {
+                                const aId = a._id ? a._id.toString() : `${a.numeroPago}_${a.fecha}_${a.monto}`;
+                                if (!ahorroIdsVistos.has(aId)) {
+                                    ahorroIdsVistos.add(aId);
+                                    todosPagosAhorro.push(a);
+                                }
+                            });
+                        }
+                        sumaAhorroTotal += (Number(obj.ahorro.montoTotal) || 0);
+                    }
+                });
+
+                todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+                todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+
+                const objPrincipal = objR || objBase;
+                const maxSemanasMiembro = Math.max(...list.map(c => Number(c.semanas) || (c.tipoCredito === '8S' ? 8 : 16)), 16);
 
                 const consolidado = {
-                    ...objR,
-                    _id: objR._id,
-                    tipoCredito: 'R',
-                    semanas: Math.max(Number(objR.semanas) || 0, Number(objCC.semanas) || 0, 16),
+                    ...objPrincipal,
+                    _id: objPrincipal._id,
+                    tipoCredito: objR ? 'R' : objBase.tipoCredito,
+                    semanas: maxSemanasMiembro,
                     pagos: todosLosPagos,
                     ahorro: {
-                        montoTotal: (objCC.ahorro?.montoTotal || 0) + (objR.ahorro?.montoTotal || 0),
+                        montoTotal: Math.max(sumaAhorroTotal, objPrincipal.ahorro?.montoTotal || 0),
                         pagosAhorro: todosPagosAhorro
                     },
-                    garantia: objR.garantia !== undefined && objR.garantia > 0 ? objR.garantia : (objCC.garantia || 0),
-                    fechaPrimerPago: objCC.fechaPrimerPago || objR.fechaPrimerPago,
-                    frecuenciaPago: objCC.frecuenciaPago || objR.frecuenciaPago || 'Semanal'
+                    garantia: (objR && objR.garantia > 0) ? objR.garantia : (objBase?.garantia || 0),
+                    fechaPrimerPago: objBase?.fechaPrimerPago || objPrincipal.fechaPrimerPago,
+                    frecuenciaPago: objBase?.frecuenciaPago || objPrincipal.frecuenciaPago || 'Semanal',
+                    pagoPactado: objPrincipal.pagoPactado || objBase?.pagoPactado || 0,
+                    saldoTotal: objPrincipal.saldoTotal || objBase?.saldoTotal || 0,
+                    saldoPendiente: objPrincipal.saldoPendiente !== undefined ? objPrincipal.saldoPendiente : (objBase?.saldoPendiente || 0)
                 };
                 creditos.push(consolidado);
-            } else {
-                const c = list[0];
-                creditos.push(c.toObject ? c.toObject() : c);
             }
         });
 
@@ -339,7 +384,21 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 return idActual === mId;
             });
             if (!yaAgregado && list.length > 0) {
-                creditos.push(list[0].toObject ? list[0].toObject() : list[0]);
+                if (list.length === 1) {
+                    creditos.push(list[0].toObject ? list[0].toObject() : { ...list[0] });
+                } else {
+                    const creditoR = list.find(c => c.tipoCredito === 'R' || c.esRefill);
+                    const creditoBase = list.find(c => c.tipoCredito === 'CC' || c.tipoCredito === '8S') || list.find(c => c.tipoCredito !== 'R') || list[0];
+                    const objPrincipal = (creditoR || creditoBase).toObject ? (creditoR || creditoBase).toObject() : { ...(creditoR || creditoBase) };
+                    const todosLosPagos = [];
+                    list.forEach(c => {
+                        const obj = c.toObject ? c.toObject() : { ...c };
+                        if (Array.isArray(obj.pagos)) todosLosPagos.push(...obj.pagos);
+                    });
+                    todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+                    objPrincipal.pagos = todosLosPagos;
+                    creditos.push(objPrincipal);
+                }
             }
         });
 
@@ -461,25 +520,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const sumIncrementoSemanas = new Array(maxSemanas).fill(0);
         const sumSolidariosSemanas = new Array(maxSemanas).fill(0);
 
-        // Condicionar para no mostrar miembros que tengan 0.0 en la última columna de S.F. (saldo pendiente 0 o liquidado)
-        // para no tener que borrarlos del grupo en la base de datos
-        const calcularSaldoFinalCredito = (c) => {
-            if (c.estado === 'Liquidado' || c.estado === 'Cancelado') return 0;
-            const totalPagos = (c.pagos || []).reduce((acc, p) => acc + (Number(p.montoPagado) || 0) + (Number(p.montoSolidario) || 0) + (Number(p.montoGarantia) || 0), 0);
-            const saldoCalc = Math.max(0, (Number(c.saldoTotal) || 0) - totalPagos);
-            if (c.saldoPendiente !== undefined && c.saldoPendiente !== null) {
-                if (Number(c.saldoPendiente) === 0 && totalPagos === 0 && Number(c.saldoTotal) > 0) {
-                    return Number(c.saldoTotal);
-                } 
-                return Number(c.saldoPendiente);
-            }
-            return saldoCalc;
-        };
-
-        const hayCreditosConSaldo = creditos.some(c => calcularSaldoFinalCredito(c) > 0);
-        const creditosVisibles = hayCreditosConSaldo
-            ? creditos.filter(c => calcularSaldoFinalCredito(c) > 0)
-            : creditos;
+        // Regla: Se deben mostrar todos los miembros que pertenezcan a este ciclo (incluso si ya están liquidados).
+        // Al pasar de ciclo, los ciclos anteriores quedan liquidados y deben seguir siendo visibles con su historial completo.
+        const creditosVisibles = creditos;
 
         // Crédito base para fecha y frecuencia: priorizar CC o el que coincida con totalSemanasGrupo
         const creditoBase = creditosVisibles.find(c => c.tipoCredito === 'CC' && Number(c.semanas) === totalSemanasGrupo)
@@ -1308,7 +1351,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 { cliente: clienteId },
                 { miembro: clienteId },
                 { _id: clienteId }
-            ]
+            ],
+            estado: { $ne: 'Cancelado' }
         })
             .populate({
                 path: 'cliente',
@@ -1317,13 +1361,14 @@ exports.generarHojaControlIndividual = async (req, res) => {
             .populate('miembro')
             .sort({ createdAt: -1 });
 
-        let creditosDelCiclo = creditos.filter(c => c.ciclo == ciclo);
+        const cicloNum = Number(ciclo);
+        let creditosDelCiclo = creditos.filter(c => Number(c.ciclo) === cicloNum || String(c.ciclo) === String(ciclo));
 
         if (creditosDelCiclo.length === 0) {
             // Fallback: Buscar los créditos más recientes o activos
             const masRec = creditos.length > 0 ? creditos[0] : null;
             if (masRec) {
-                creditosDelCiclo = creditos.filter(c => c.ciclo == masRec.ciclo);
+                creditosDelCiclo = creditos.filter(c => Number(c.ciclo) === Number(masRec.ciclo));
             }
         }
 
@@ -1333,29 +1378,45 @@ exports.generarHojaControlIndividual = async (req, res) => {
 
         let credito;
         if (creditosDelCiclo.length > 1) {
-            const creditoActivo = creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[0];
-            const creditoLiquidado = creditosDelCiclo.find(c => c.estado !== 'Activo');
+            const creditoR = creditosDelCiclo.find(c => c.tipoCredito === 'R' || c.esRefill);
+            const creditoBase = creditosDelCiclo.find(c => c._id?.toString() !== creditoR?._id?.toString()) || creditosDelCiclo[0];
 
-            credito = creditoActivo.toObject ? creditoActivo.toObject() : { ...creditoActivo };
+            const creditoPrincipal = creditoR || creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[0];
+            credito = creditoPrincipal.toObject ? creditoPrincipal.toObject() : { ...creditoPrincipal };
 
-            if (creditoLiquidado) {
-                 const objLiquidado = creditoLiquidado.toObject ? creditoLiquidado.toObject() : { ...creditoLiquidado };
-                 
-                 // Combinar pagos
-                 const todosLosPagos = [...(objLiquidado.pagos || []), ...(credito.pagos || [])];
-                 todosLosPagos.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+            // Combinar todos los pagos y ahorros de todos los créditos del ciclo sin duplicar
+            const todosLosPagos = [];
+            const todosPagosAhorro = [];
+            const pagosIdsVistos = new Set();
+            const ahorroIdsVistos = new Set();
 
-                 const todosPagosAhorro = [...((objLiquidado.ahorro && objLiquidado.ahorro.pagosAhorro) || []), ...((credito.ahorro && credito.ahorro.pagosAhorro) || [])];
-                 todosPagosAhorro.sort((a, b) => (a.numeroPago || 0) - (b.numeroPago || 0));
+            creditosDelCiclo.forEach(c => {
+                const cObj = c.toObject ? c.toObject() : { ...c };
+                (cObj.pagos || []).forEach(p => {
+                    const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                    if (!pagosIdsVistos.has(pId)) {
+                        pagosIdsVistos.add(pId);
+                        todosLosPagos.push(p);
+                    }
+                });
+                ((cObj.ahorro && cObj.ahorro.pagosAhorro) || []).forEach(a => {
+                    const aId = a._id ? a._id.toString() : `${a.numeroPago}_${a.fecha}_${a.monto}`;
+                    if (!ahorroIdsVistos.has(aId)) {
+                        ahorroIdsVistos.add(aId);
+                        todosPagosAhorro.push(a);
+                    }
+                });
+            });
 
-                 credito.pagos = todosLosPagos;
-                 if (!credito.ahorro) credito.ahorro = {};
-                 credito.ahorro.pagosAhorro = todosPagosAhorro;
-                 
-                 // Respetar la fecha de inicio original y el monto original
-                 if (objLiquidado.fechaPrimerPago) {
-                     credito.fechaPrimerPago = objLiquidado.fechaPrimerPago;
-                 }
+            todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+            todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+
+            credito.pagos = todosLosPagos;
+            if (!credito.ahorro) credito.ahorro = {};
+            credito.ahorro.pagosAhorro = todosPagosAhorro;
+
+            if (creditoBase && creditoBase.fechaPrimerPago) {
+                credito.fechaPrimerPago = creditoBase.fechaPrimerPago;
             }
         } else {
             credito = creditosDelCiclo[0];
