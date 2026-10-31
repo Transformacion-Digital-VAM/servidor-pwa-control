@@ -25,8 +25,7 @@ exports.crearCredito = async (req, res) => {
             porcentajeGarantia,
             equivalenciaMeses,
             plazoMeses,
-            frecuenciaPago,
-            estadoGrupo
+            frecuenciaPago
         } = req.body;
 
         const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
@@ -50,7 +49,7 @@ exports.crearCredito = async (req, res) => {
             req.body.cliente = null;
         }
 
-        // Validar semanas
+        // Validar semanas: respetar prioritariamente lo enviado por el frontend/usuario
         let numSemanas = 16;
         if (semanas && Number(semanas) > 0) {
             numSemanas = Number(semanas);
@@ -77,22 +76,20 @@ exports.crearCredito = async (req, res) => {
             }
         }
 
-        // Ajuste de garantía para créditos de 8 semanas: se duplica (x2)
-        if (tipoCredito === '8S' || numSemanas === 8) {
+        // Ajuste de garantía solo si efectivamente son 8 semanas y no se especificó garantía fija
+        if (garantia === undefined && numSemanas === 8) {
             garantiaCalculada = garantiaCalculada * 2;
         }
 
-        // Si viene pagoPactado en el body se utiliza; si es 8S y viene el pactado de 16s, se duplica para cubrir el total
-        let pagoPactadoCalc = req.body.pagoPactado;
+        // Respetar el pagoPactado enviado por el usuario; solo calcular si no viene en el body
+        let pagoPactadoCalc = (req.body.pagoPactado !== undefined && req.body.pagoPactado !== null && req.body.pagoPactado !== '')
+            ? Number(req.body.pagoPactado)
+            : null;
+
         if (!pagoPactadoCalc) {
             const tasa = tasaInteres || 0;
             const totalConInteres = montoSolicitado * (1 + (tasa * meses / 100));
             pagoPactadoCalc = Math.ceil(totalConInteres / numSemanas);
-        } else if (tipoCredito === '8S') {
-            // Si el pactado enviado es el de 16 semanas (ej. 900), para 8S debe ser el doble (1800)
-            if (pagoPactadoCalc * 8 < montoSolicitado) {
-                pagoPactadoCalc = pagoPactadoCalc * 2;
-            }
         }
 
         const saldoTotalCalc = tipoCredito === 'Individual' && req.body.saldoTotal
@@ -104,16 +101,8 @@ exports.crearCredito = async (req, res) => {
             tipoCredito
         };
 
-        let esRefillVal = false;
         if (tipoCredito === 'Individual') {
             query.cliente = cliente;
-            // Permitir "Refill" individual: buscar solo Activos para actualizar, si está Liquidado/Cancelado creará uno nuevo
-            query.estado = 'Activo';
-            
-            const creditoPrevio = await Credito.findOne({ ciclo, cliente, tipoCredito: 'Individual', estado: { $ne: 'Activo' } });
-            if (creditoPrevio || estadoGrupo === 'R' || req.body.estadoGrupo === 'R') {
-                esRefillVal = true;
-            }
         } else {
             query.miembro = miembro;
         }
@@ -138,9 +127,7 @@ exports.crearCredito = async (req, res) => {
             garantiaPredial: req.body.garantiaPredial || '',
             equivalenciaMeses: meses,
             grupoOpcional: req.body.grupoOpcional || '',
-            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, frecFinal),
-            estadoGrupo: estadoGrupo || req.body.estadoGrupo || null,
-            esRefill: esRefillVal
+            semanaActual: req.body.semanaActual || calcularSemanaActual(fechaPrimerPago, frecFinal)
         };
 
         if (tipoCredito !== 'Individual') {
@@ -195,27 +182,7 @@ exports.obtenerCreditos = async (req, res) => {
         const user = req.user;
 
         // 1. Filtrado por rol del usuario o por parámetros de búsqueda
-        if (req.query.cliente) {
-            const clId = req.query.cliente;
-            const clIdObj = mongoose.Types.ObjectId.isValid(clId) ? new mongoose.Types.ObjectId(clId) : clId;
-            query = {
-                $or: [
-                    { cliente: clId },
-                    ...(mongoose.Types.ObjectId.isValid(clId) ? [{ cliente: clIdObj }] : [])
-                ]
-            };
-        } else if (req.query.tipoCredito === 'Individual') {
-            if (req.query.asesor && req.query.asesor !== 'todos') {
-                const aId = req.query.asesor;
-                const clientesAsesor = await Cliente.find({ asesor: aId }).select('_id').lean();
-                query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
-            } else if (user && user.role && user.role.toLowerCase() === 'asesor') {
-                const clientesAsesor = await Cliente.find({ asesor: user.id }).select('_id').lean();
-                query = { cliente: { $in: clientesAsesor.map(c => c._id) }, tipoCredito: 'Individual' };
-            } else {
-                query = { tipoCredito: 'Individual' };
-            }
-        } else if (req.query.asesor && req.query.asesor !== 'todos') {
+        if (req.query.asesor && req.query.asesor !== 'todos') {
             const aId = req.query.asesor;
             const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
             const [gruposAsesor, clientesAsesor] = await Promise.all([
@@ -322,7 +289,6 @@ exports.obtenerCreditos = async (req, res) => {
                 cliente: 1,
                 estado: 1,
                 estadoGrupo: 1,
-                esRefill: 1,
                 semanas: 1,
                 pagoPactado: 1,
                 saldoTotal: 1,
@@ -335,9 +301,6 @@ exports.obtenerCreditos = async (req, res) => {
                 motivoCancelacion: 1,
                 justificacionCancelacion: 1,
                 fechaCancelacion: 1,
-                garantia: 1,
-                liquidadoConGarantia: 1,
-                garantiaAplicada: 1,
                 'pagos.numeroPago': 1,
                 'pagos.fechaPago': 1,
                 'pagos.montoPagado': 1,
@@ -346,10 +309,7 @@ exports.obtenerCreditos = async (req, res) => {
                 'pagos.quienPrestoSolidario': 1,
                 'pagos.recuperacionSolidario': 1,
                 'pagos.metodoPago': 1,
-                'pagos.numeroRecibo': 1,
-                'pagos.montoAhorro':1,
-                'pagos.aplicaGarantia': 1,
-                'pagos.montoGarantia': 1
+                'pagos.numeroRecibo': 1
             })
             .sort({ ciclo: -1, createdAt: -1 })
             .lean();
@@ -359,7 +319,7 @@ exports.obtenerCreditos = async (req, res) => {
 
         creditos.forEach(credito => {
             // Recalcular saldo pendiente real si viene en 0 o desfasado en créditos no liquidados
-            const totalPagado = (credito.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0) + (p.montoGarantia || 0), 0);
+            const totalPagado = (credito.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
             const saldoCalculado = Math.max(0, (credito.saldoTotal || 0) - totalPagado);
             if ((credito.saldoPendiente === undefined || credito.saldoPendiente === null || credito.saldoPendiente === 0) && saldoCalculado > 0 && credito.estado !== 'Liquidado' && credito.estado !== 'Cancelado') {
                 credito.saldoPendiente = saldoCalculado;
@@ -384,18 +344,12 @@ exports.obtenerCreditos = async (req, res) => {
         }
 
         let creditosParaEnviar = creditos;
-        if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true' && !req.query.cliente) {
+        if (req.query.incluirHistorico !== 'true' && req.query.todos !== 'true') {
             const miembrosConRefillPorCiclo = new Set();
-            const clientesConIndividualActivoPorCiclo = new Set();
-            
             creditos.forEach(c => {
                 if (c.miembro && c.tipoCredito === 'R') {
                     const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
                     miembrosConRefillPorCiclo.add(`${miembroId}_${c.ciclo}`);
-                }
-                if (c.cliente && c.tipoCredito === 'Individual' && c.estado === 'Activo') {
-                    const clienteId = c.cliente._id ? c.cliente._id.toString() : c.cliente.toString();
-                    clientesConIndividualActivoPorCiclo.add(`${clienteId}_${c.ciclo}`);
                 }
             });
 
@@ -404,12 +358,6 @@ exports.obtenerCreditos = async (req, res) => {
                     const miembroId = c.miembro._id ? c.miembro._id.toString() : c.miembro.toString();
                     if (miembrosConRefillPorCiclo.has(`${miembroId}_${c.ciclo}`)) {
                         return false; // Omitir el CC anterior porque el R es la continuación vigente
-                    }
-                }
-                if (c.cliente && c.tipoCredito === 'Individual' && c.estado !== 'Activo') {
-                    const clienteId = c.cliente._id ? c.cliente._id.toString() : c.cliente.toString();
-                    if (clientesConIndividualActivoPorCiclo.has(`${clienteId}_${c.ciclo}`)) {
-                        return false; // Omitir el Individual liquidado si hay uno activo en el mismo ciclo
                     }
                 }
                 return true;
@@ -525,24 +473,28 @@ exports.actualizarCredito = async (req, res) => {
                 ? datosActualizar.porcentajeGarantia
                 : (creditoOriginal.porcentajeGarantia !== undefined ? creditoOriginal.porcentajeGarantia : 10);
 
-            datosActualizar.semanas = 8;
-            // Garantía sobre el monto solicitado (duplicada x2 para 8 semanas)
+            const semanasNum = datosActualizar.semanas ? Number(datosActualizar.semanas) : (creditoOriginal.semanas || 16);
+            datosActualizar.semanas = semanasNum;
+
+            // Garantía sobre el monto solicitado
             if (datosActualizar.garantia === undefined) {
-                datosActualizar.garantia = (montoSolicitado * (porc / 100)) * 2;
+                const garantiaBase = montoSolicitado * (porc / 100);
+                datosActualizar.garantia = semanasNum === 8 ? (garantiaBase * 2) : garantiaBase;
             }
 
-            let pactado8 = datosActualizar.pagoPactado || creditoOriginal.pagoPactado;
+            let pactado8 = (datosActualizar.pagoPactado !== undefined && datosActualizar.pagoPactado !== null)
+                ? Number(datosActualizar.pagoPactado)
+                : (creditoOriginal.pagoPactado || null);
+
             if (!pactado8) {
                 const meses = datosActualizar.equivalenciaMeses || creditoOriginal.equivalenciaMeses || 4;
                 const tasa = datosActualizar.tasaInteres || creditoOriginal.tasaInteres || 0;
                 const totalConInteres = montoSolicitado * (1 + (tasa * meses / 100));
-                pactado8 = totalConInteres / 8;
-            } else if (pactado8 * 8 < montoSolicitado) {
-                pactado8 = pactado8 * 2;
+                pactado8 = Math.ceil(totalConInteres / semanasNum);
             }
 
             datosActualizar.pagoPactado = pactado8;
-            const nuevoSaldoTotal = pactado8 * 8;
+            const nuevoSaldoTotal = pactado8 * semanasNum;
             datosActualizar.saldoTotal = nuevoSaldoTotal;
 
             const totalPagado = (creditoOriginal.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0), 0);
@@ -692,7 +644,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago, aplicaGarantia
+            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago
         } = req.body;
 
         const beneficiariosSolidarios = Array.isArray(req.body.beneficiariosSolidarios)
@@ -741,33 +693,7 @@ exports.registrarPago = async (req, res) => {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_LIQUIDADO', 'Intento de abonar a crédito Individual ya liquidado', { creditoId: id, montoCreditoNum });
                 return res.status(400).json({ ok: false, msg: 'El crédito ya está liquidado' });
             }
-            // --- APLICACIÓN DE GARANTÍA PARA LIQUIDAR (solo crédito Individual activo) ---
-            // La garantía cubre lo que falte del saldo pendiente después del abono en dinero.
-            const usarGarantia = aplicaGarantia === true || aplicaGarantia === 'true';
-            let montoGarantiaNum = 0;
-            if (usarGarantia) {
-                if (creditoOrigen.estado !== 'Activo') {
-                    logWarn(req, 'APLICAR_GARANTIA_CREDITO_NO_ACTIVO', 'Intento de aplicar garantía a crédito no activo', { creditoId: id, estado: creditoOrigen.estado });
-                    return res.status(400).json({ ok: false, msg: 'Solo se puede aplicar la garantía a un crédito activo' });
-                }
-                const garantiaDisponible = Number(creditoOrigen.garantia) || 0;
-                const faltanteParaLiquidar = Math.max(0, (Number(creditoOrigen.saldoPendiente) || 0) - montoCreditoNum);
-
-                if (faltanteParaLiquidar <= 0) {
-                    logWarn(req, 'APLICAR_GARANTIA_INNECESARIA', 'El abono ya liquida el crédito, no se requiere garantía', { creditoId: id, montoCreditoNum });
-                    return res.status(400).json({ ok: false, msg: 'El monto ingresado ya liquida el crédito; desmarca "Aplicar Garantía".' });
-                }
-                if (garantiaDisponible < faltanteParaLiquidar) {
-                    logWarn(req, 'APLICAR_GARANTIA_INSUFICIENTE', 'Garantía insuficiente para liquidar', { creditoId: id, garantiaDisponible, faltanteParaLiquidar });
-                    return res.status(400).json({
-                        ok: false,
-                        msg: `La garantía disponible ($${garantiaDisponible}) no alcanza para liquidar el faltante ($${faltanteParaLiquidar}). Completa la diferencia ($${faltanteParaLiquidar - garantiaDisponible}) con otro método de pago.`
-                    });
-                }
-                montoGarantiaNum = faltanteParaLiquidar;
-            }
-
-            if (sumaTotal + montoGarantiaNum <= 0) {
+            if (sumaTotal <= 0) {
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_MONTO_CERO', 'Monto total ingresado es 0 o menor', { creditoId: id, body: req.body });
                 return res.status(400).json({ ok: false, msg: 'El monto total ingresado debe ser mayor a 0' });
             }
@@ -836,14 +762,13 @@ exports.registrarPago = async (req, res) => {
             } else if (trRestante > 0) cuotaMetodo = 'TRANSFERENCIA';
             else if (tjRestante > 0) cuotaMetodo = 'TARJETA';
             else if (dpRestante > 0) cuotaMetodo = 'DEPOSITO';
-            else if (montoGarantiaNum > 0 && montoCreditoNum <= 0) cuotaMetodo = 'GARANTIA';
             else cuotaMetodo = 'EFECTIVO';
 
             const esAtraso = numSemana < semanaCalendario;
             const esAdelanto = numSemana > semanaCalendario;
 
-            let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0) + (p.montoGarantia || 0), 0);
-            const totalPagadoNuevo = totalHistInd + montoCreditoNum + (montoSolidarioNum || 0) + montoGarantiaNum;
+            let totalHistInd = (creditoOrigen.pagos || []).reduce((acc, p) => acc + (p.montoPagado || 0) + (p.montoSolidario || 0), 0);
+            const totalPagadoNuevo = totalHistInd + montoCreditoNum + (montoSolidarioNum || 0);
 
             const nuevoPago = {
                 numeroPago: numSemana,
@@ -864,8 +789,6 @@ exports.registrarPago = async (req, res) => {
                 tarjetaAhorro: tarjetaAhorro || 0,
                 depositoAhorro: depositoAhorro || 0,
                 recuperacionSolidario: !!recuperacionSolidario,
-                aplicaGarantia: montoGarantiaNum > 0,
-                montoGarantia: montoGarantiaNum,
                 esAdelanto,
                 esAtraso,
                 fechaPago: fechaPagoObj,
@@ -879,15 +802,6 @@ exports.registrarPago = async (req, res) => {
 
             creditoOrigen.pagos.push(nuevoPago);
             creditoOrigen.saldoPendiente -= montoCreditoNum;
-
-            // Descontar de la garantía del crédito activo el monto usado para liquidar
-            const garantiaAnterior = Number(creditoOrigen.garantia) || 0;
-            if (montoGarantiaNum > 0) {
-                creditoOrigen.saldoPendiente -= montoGarantiaNum;
-                creditoOrigen.garantia = Math.max(0, garantiaAnterior - montoGarantiaNum);
-                creditoOrigen.garantiaAplicada = (Number(creditoOrigen.garantiaAplicada) || 0) + montoGarantiaNum;
-                creditoOrigen.liquidadoConGarantia = true;
-            }
 
             // Actualizar saldo solidario si aplica (Individual)
             if (pagoSolidario) {
@@ -910,14 +824,12 @@ exports.registrarPago = async (req, res) => {
             await creditoOrigen.save();
 
             logAccion(req, 'REGISTRAR_PAGO_INDIVIDUAL', {
-                descripcion: `Pago Individual #${numSemana} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum}${montoGarantiaNum > 0 ? `, Garantía aplicada: $${montoGarantiaNum}` : ''})`,
-                datos: { creditoId: id, montoCreditoNum, montoAhorroNum, montoGarantiaNum, metodoPago, numeroRecibo },
+                descripcion: `Pago Individual #${numSemana} registrado en Crédito ${id} por $${montoCreditoNum} (Ahorro: $${montoAhorroNum})`,
+                datos: { creditoId: id, montoCreditoNum, montoAhorroNum, metodoPago, numeroRecibo },
                 resultado: {
                     numerosPago: `${numSemana}`,
                     saldoAnterior,
                     nuevoSaldo: creditoOrigen.saldoPendiente,
-                    garantiaAnterior,
-                    garantiaRestante: creditoOrigen.garantia,
                     estado: creditoOrigen.estado,
                     totalPagosEnCredito: creditoOrigen.pagos.length
                 }
@@ -925,9 +837,7 @@ exports.registrarPago = async (req, res) => {
 
             return res.json({
                 ok: true,
-                msg: montoGarantiaNum > 0
-                    ? `Crédito liquidado aplicando $${montoGarantiaNum} de garantía`
-                    : 'Pago registrado correctamente (Individual)',
+                msg: 'Pago registrado correctamente (Individual)',
                 credito: creditoOrigen
             });
         }
@@ -1015,13 +925,10 @@ exports.registrarPago = async (req, res) => {
             }
 
             // Registrar el pago en el crédito de origen (el que presta)
-            const semanaCalendario = Number(calcularSemanaActual(creditoOrigen.fechaPrimerPago, creditoOrigen.frecuenciaPago || 'Semanal', fechaPago ? new Date(fechaPago) : new Date())) || 1;
-            const numeroPagoNum = req.body.numeroPago ? Number(req.body.numeroPago) : null;
-            const numSemanaO = (numeroPagoNum && numeroPagoNum > 0) ? numeroPagoNum : semanaCalendario;
-
+            const numeroPagoOrigen = (creditoOrigen.pagos || []).length + 1;
             const pagoMaster = {
-                numeroPago: numSemanaO,
-                montoPagado: montoCreditoNum,
+                numeroPago: numeroPagoOrigen,
+                montoPagado: 0,
                 efectivoCredito: efectivoCredito || 0,
                 transferenciaCredito: transferenciaCredito || 0,
                 tarjetaCredito: tarjetaCredito || 0,
@@ -1606,19 +1513,68 @@ function distribuirCuotasPago({
         }
     }
 
-    let esAtrasoGlobal = false;
-    let esAdelantoGlobal = false;
+    // 2. Calcular faltante de la semana actual
+    const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
 
-    if (deudaAtrasosPasados > 0) {
-        esAtrasoGlobal = true;
-    } else {
-        const faltaSemanaActual = Math.max(0, pagoPactado - (pagadoPorSemana[semanaCalendario] || 0));
-        if (restanteCredito > faltaSemanaActual) {
-            esAdelantoGlobal = true;
+    // A) Primero cubrimos atrasos de semanas pasadas (se registran en la semana actual donde se realizó el pago)
+    if (deudaAtrasosPasados > 0 && restanteCredito > 0) {
+        let montoParaAtrasos = Math.min(restanteCredito, deudaAtrasosPasados);
+        let tempAtrasos = montoParaAtrasos;
+
+        while (tempAtrasos > 0) {
+            const montoCuota = Math.min(tempAtrasos, pagoPactado);
+            nuevosPagos.push(construirItemPago(semanaCalendario, false, true, montoCuota));
+            tempAtrasos -= montoCuota;
+            restanteCredito -= montoCuota;
+        }
+
+        // Actualizar cobertura interna de semanas anteriores para control de saldos
+        let tempMonto = montoParaAtrasos;
+        for (let s = 1; s < semanaCalendario && tempMonto > 0; s++) {
+            const pagado = pagadoPorSemana[s] || 0;
+            const falta = Math.max(0, pagoPactado - pagado);
+            if (falta > 0) {
+                const abono = Math.min(tempMonto, falta);
+                pagadoPorSemana[s] = pagado + abono;
+                tempMonto -= abono;
+            }
         }
     }
 
-    nuevosPagos.push(construirItemPago(semanaCalendario, esAdelantoGlobal, esAtrasoGlobal, restanteCredito));
+    // B) Luego cubrimos la cuota de la semana actual (se registra con esAtraso = false en la casilla de la semana actual)
+    if (faltaSemanaActual > 0 && restanteCredito > 0) {
+        let montoParaActual = Math.min(restanteCredito, faltaSemanaActual);
+        let tempActual = montoParaActual;
+
+        while (tempActual > 0) {
+            const montoCuota = Math.min(tempActual, pagoPactado);
+            nuevosPagos.push(construirItemPago(semanaCalendario, false, false, montoCuota));
+            tempActual -= montoCuota;
+            restanteCredito -= montoCuota;
+        }
+
+        pagadoPorSemana[semanaCalendario] = (pagadoPorSemana[semanaCalendario] || 0) + montoParaActual;
+    }
+
+    // C) Si aún queda dinero restante, es un ADELANTO para semanas futuras (se registra con esAdelanto = true, esAtraso = false)
+    if (restanteCredito > 0) {
+        let semanaFutura = semanaCalendario + 1;
+        while (pagadoPorSemana[semanaFutura] && pagadoPorSemana[semanaFutura] >= pagoPactado) {
+            semanaFutura++;
+        }
+
+        while (restanteCredito > 0) {
+            const pagadoActual = pagadoPorSemana[semanaFutura] || 0;
+            const faltaSemana = Math.max(0, pagoPactado - pagadoActual);
+            const montoCuota = faltaSemana > 0 ? Math.min(restanteCredito, faltaSemana) : Math.min(restanteCredito, pagoPactado);
+
+            nuevosPagos.push(construirItemPago(semanaFutura, true, false, montoCuota));
+
+            pagadoPorSemana[semanaFutura] = (pagadoPorSemana[semanaFutura] || 0) + montoCuota;
+            restanteCredito -= montoCuota;
+            semanaFutura++;
+        }
+    }
 
     return nuevosPagos;
 }
@@ -1762,29 +1718,21 @@ function consolidarPagosIndividual(pagos = []) {
 
         const fecha1 = p1.fechaPago ? new Date(p1.fechaPago) : null;
         const recibo1 = p1.numeroRecibo ? Number(p1.numeroRecibo) : null;
-        const esSol1 = p1.pagoSolidario === true || (Number(p1.montoSolidario) > 0);
 
-        if (fecha1) {
+        if (recibo1 && recibo1 > 0 && fecha1) {
             for (let j = i + 1; j < pagos.length; j++) {
                 if (visitados.has(j)) continue;
                 const p2 = pagos[j];
-                const fecha2 = p2.fechaPago ? new Date(p2.fechaPago) : null;
-                if (!fecha2) continue;
-
-                const difMs = Math.abs(fecha1.getTime() - fecha2.getTime());
-                const mismoDia = fecha1.toDateString() === fecha2.toDateString();
-
-                // Caso A: Mismo número de recibo en el mismo día o con diferencia < 10 min
                 const recibo2 = p2.numeroRecibo ? Number(p2.numeroRecibo) : null;
-                const matchRecibo = recibo1 && recibo1 > 0 && recibo1 === recibo2 && (mismoDia || difMs < 10 * 60 * 1000);
+                const fecha2 = p2.fechaPago ? new Date(p2.fechaPago) : null;
 
-                // Caso B: Pagos solidarios en la misma fecha y mismo número de pago
-                const esSol2 = p2.pagoSolidario === true || (Number(p2.montoSolidario) > 0);
-                const matchSolidario = esSol1 && esSol2 && Number(p1.numeroPago) === Number(p2.numeroPago) && mismoDia;
-
-                if (matchRecibo || matchSolidario) {
-                    grupo.push(p2);
-                    visitados.add(j);
+                if (recibo1 === recibo2 && fecha2) {
+                    const difMs = Math.abs(fecha1.getTime() - fecha2.getTime());
+                    const mismoDia = fecha1.toDateString() === fecha2.toDateString();
+                    if (mismoDia || difMs < 10 * 60 * 1000) {
+                        grupo.push(p2);
+                        visitados.add(j);
+                    }
                 }
             }
         }
@@ -1821,7 +1769,6 @@ function consolidarPagosIndividual(pagos = []) {
                 depositoCredito: depositoTotal,
                 montoAhorro: ahorroTotal,
                 montoSolidario: solidarioTotal,
-                pagoSolidario: grupo.some(g => g.pagoSolidario === true || (Number(g.montoSolidario) > 0)),
                 metodoPago: metodoFinal,
                 esAdelanto: grupo.every(g => g.esAdelanto),
                 esAtraso: grupo.some(g => g.esAtraso && !g.esAdelanto),
