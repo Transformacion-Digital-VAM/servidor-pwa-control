@@ -182,7 +182,18 @@ exports.obtenerCreditos = async (req, res) => {
         const user = req.user;
 
         // 1. Filtrado por rol del usuario o por parámetros de búsqueda
-        if (req.query.asesor && req.query.asesor !== 'todos') {
+        if (req.query.cliente || req.query.miembro) {
+            const entidadId = req.query.cliente || req.query.miembro;
+            const idObj = mongoose.Types.ObjectId.isValid(entidadId) ? new mongoose.Types.ObjectId(entidadId) : entidadId;
+            query = {
+                $or: [
+                    { cliente: entidadId },
+                    { cliente: idObj },
+                    { miembro: entidadId },
+                    { miembro: idObj }
+                ]
+            };
+        } else if (req.query.asesor && req.query.asesor !== 'todos') {
             const aId = req.query.asesor;
             const aIdObj = mongoose.Types.ObjectId.isValid(aId) ? new mongoose.Types.ObjectId(aId) : aId;
             const [gruposAsesor, clientesAsesor] = await Promise.all([
