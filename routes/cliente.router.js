@@ -12,4 +12,5 @@ router.get('/:id', verifyToken, clienteController.getClientePorId); //verifyToke
 router.put('/:id', verifyToken, clienteController.updateCliente); //verifyToken
 router.delete('/:id', verifyToken, clienteController.deleteCliente); //verifyToken
 
+
 module.exports = router;

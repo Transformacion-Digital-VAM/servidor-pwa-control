@@ -1,0 +1,22 @@
+[2026-11-03 16:27:06.240] [ERROR] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_GRUPO_CON_CREDITO_INDIVIDUAL_ERROR] Error: Cannot read properties of undefined (reading 'lean') | DETALLES: {"query":{}} | STACK: TypeError: Cannot read properties of undefined (reading 'lean')
+    at exports.getMiembrosGrupoConCreditoIndividual (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\controllers\cliente.controller.js:264:13)
+    at Layer.handleRequest (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\lib\layer.js:152:17)
+    at next (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\lib\route.js:157:13)
+    at Route.dispatch (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\lib\route.js:117:3)
+    at handle (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\index.js:435:11)
+    at Layer.handleRequest (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\lib\layer.js:152:17)
+    at C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\index.js:295:15
+    at processParams (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\index.js:582:12)
+    at next (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\index.js:291:5)
+    at router.handle (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\node_modules\router\index.js:186:3)
+[2026-11-03 16:28:13.146] [ERROR] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_GRUPO_CON_CREDITO_INDIVIDUAL_ERROR] Error: grupoDocs is not defined | DETALLES: {"query":{}} | STACK: ReferenceError: grupoDocs is not defined
+    at exports.getMiembrosGrupoConCreditoIndividual (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\controllers\cliente.controller.js:287:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-11-03 16:29:03.988] [ERROR] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_GRUPO_CON_CREDITO_INDIVIDUAL_ERROR] Error: gr_ is not defined | DETALLES: {"query":{}} | STACK: ReferenceError: gr_ is not defined
+    at exports.getMiembrosGrupoConCreditoIndividual (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\controllers\cliente.controller.js:288:38)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[2026-11-03 16:30:05.489] [ERROR] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_GRUPO_CON_CREDITO_INDIVIDUAL_ERROR] Error: grupoMap is not defined | DETALLES: {"query":{}} | STACK: ReferenceError: grupoMap is not defined
+    at C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\controllers\cliente.controller.js:312:37
+    at Array.map (<anonymous>)
+    at exports.getMiembrosGrupoConCreditoIndividual (C:\Users\danie\Documents\PROYECTOS\HOJA DE CONTROL\servidor\controllers\cliente.controller.js:301:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)

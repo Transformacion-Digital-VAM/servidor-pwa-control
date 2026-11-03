@@ -10,3 +10,9 @@
 [2026-10-31 18:02:31.535] [HTTP] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] POST /api/miembros/create -> Status: 201 (319ms)
 [2026-10-31 18:02:31.681] [EXITO] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GUARDAR_CREDITO] Crédito 8S (Ciclo 2) guardado/actualizado para Miembro 6ae62d37bfaed8d4ad5ff906 - Monto: $37500 | DATOS_ENTRADA: {"tipoCredito":"8S","ciclo":2,"miembro":"6ae62d37bfaed8d4ad5ff906","montoSolicitado":37500,"pagoPactado":2813,"saldoTotal":45008} | RESULTADO: {"creditoId":"6ae62d3880574ecd147061fa","estado":"Activo","saldoPendiente":45008}
 [2026-10-31 18:02:31.688] [HTTP] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] POST /api/creditos/ -> Status: 201 (104ms)
+[2026-10-31 19:35:52.733] [HTTP] [Usuario: Elisa LSMA | Rol: master | ID: 69f4bd469d6d25e533b24c8d | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (182ms)
+[2026-10-31 19:36:51.030] [HTTP] [Usuario: ARELY | Rol: asesor | ID: 69d6afbb7a11ddb40c7993f6 | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (203ms)
+[2026-10-31 19:41:47.595] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (161ms)
+[2026-10-31 19:44:07.006] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (407ms)
+[2026-10-31 19:52:25.783] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (240ms)
+[2026-10-31 19:53:19.653] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (217ms)
