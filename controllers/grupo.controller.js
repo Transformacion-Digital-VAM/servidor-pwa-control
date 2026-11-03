@@ -1,8 +1,10 @@
+const mongoose = require('mongoose');
 const Grupo = require('../models/Grupo');
 const Credito = require('../models/Credito');
 const User = require('../models/User');
+const Coordinacion = require('../models/Coordinacion');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
-const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { normalizarRol, extraerIdStr, obtenerCoordinacionId, getAsesoresDeCoordinacion, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 
 /**
  * Función auxiliar para extraer todos los datos del modelo Grupo
@@ -24,12 +26,44 @@ const formatGrupoData = (grupo) => {
     };
 };
 
+/**
+ * Asegura que cada grupo tenga su coordinación y el rol normalizado de su asesor/ejecutiva
+ * sin perder el ID original de coordinación si el populate de Mongoose devuelve null.
+ */
+async function normalizarGrupos(grupos) {
+    if (!Array.isArray(grupos) || grupos.length === 0) return [];
+    const coordinaciones = await Coordinacion.find({}, { nombre: 1 }).lean();
+    const coordMap = new Map(coordinaciones.map(c => [String(c._id), c]));
+
+    return grupos.map(g => {
+        if (g.asesor && typeof g.asesor === 'object') {
+            g.asesor.role = normalizarRol(g.asesor.role);
+        }
+        const gCoordId = extraerIdStr(g.coordinacion) || extraerIdStr(g.asesor?.coordinacion);
+        if (gCoordId) {
+            g.coordinacion = coordMap.get(gCoordId) || { _id: gCoordId, nombre: g.coordinacion?.nombre || 'Coordinación' };
+        }
+        return g;
+    });
+}
+
 exports.createGrupo = async (req, res) => {
     try {
         // Solo el Admin, master o superadmin pueden crear grupos
         if (!['admin', 'master', 'superadmin'].includes(req.user.role)) {
             logWarn(req, 'CREAR_GRUPO_DENEGADO', `Permisos insuficientes para crear grupo (Rol: ${req.user.role})`, { body: req.body });
             return res.status(403).json({ message: "No tienes permisos para crear grupos" });
+        }
+
+        // Auto-asignar coordinación desde el asesor seleccionado (o usuario creador) si no viene en el body
+        if (!req.body.coordinacion && req.body.asesor && mongoose.Types.ObjectId.isValid(req.body.asesor)) {
+            const asesorDoc = await User.findById(req.body.asesor).select('coordinacion').lean();
+            if (asesorDoc && asesorDoc.coordinacion) {
+                req.body.coordinacion = asesorDoc.coordinacion;
+            }
+        }
+        if (!req.body.coordinacion && req.user?.coordinacion && mongoose.Types.ObjectId.isValid(String(req.user.coordinacion))) {
+            req.body.coordinacion = req.user.coordinacion;
         }
 
         const grupo = new Grupo(req.body);
@@ -48,15 +82,15 @@ exports.createGrupo = async (req, res) => {
         logError(req, 'CREAR_GRUPO_ERROR', error, { body: req.body });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getGrupos = async (req, res) => {
     try {
         let query = {};
-        const mongoose = require('mongoose');
+        const role = normalizarRol(req.user?.role);
 
         // Filtro estricto por roles para el listado
-        if (req.user && req.user.role && req.user.role.toLowerCase() === 'asesor') {
+        if (role === 'asesor') {
             const userId = req.user.id;
             query = {
                 $or: [
@@ -64,30 +98,30 @@ exports.getGrupos = async (req, res) => {
                     ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
                 ]
             };
-        } else if (req.user && req.user.role && req.user.role.toLowerCase() === 'coordinador') {
+        } else if (role === 'coordinador') {
             const coordId = await obtenerCoordinacionId(req.user);
             query = await buildFiltroCoordinacion(coordId, req.query.asesor, req.user.id);
         }
         // Si es admin o master, query = {} (ve todo)
 
-        const grupos = await Grupo.find(query)
-            .populate('asesor', 'username nombre coordinacion')
-            .populate('coordinacion', 'nombre')
+        const gruposRaw = await Grupo.find(query)
+            .populate('asesor', 'username nombre role coordinacion')
             .populate('integrantes')
             .lean();
 
+        const grupos = await normalizarGrupos(gruposRaw);
         res.status(200).json(grupos);
     } catch (error) {
         logError(req, 'GET_GRUPOS_ERROR', error);
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getGrupoById = async (req, res) => {
     try {
         const grupo = await Grupo.findById(req.params.id)
             .populate('integrantes')
-            .populate('asesor', 'username nombre')
+            .populate('asesor', 'username nombre role coordinacion')
             .populate('coordinacion', 'nombre');
 
         if (!grupo) {
@@ -95,24 +129,25 @@ exports.getGrupoById = async (req, res) => {
             return res.status(404).json({ message: "Grupo no encontrado" });
         }
 
+        const role = normalizarRol(req.user?.role);
+
         // Verificación de seguridad individual (por si intentan entrar por ID directo)
-        if (req.user.role === 'asesor' && grupo.asesor && grupo.asesor._id.toString() !== req.user.id) {
+        if (role === 'asesor' && grupo.asesor && grupo.asesor._id.toString() !== req.user.id) {
             logWarn(req, 'GET_GRUPO_DENEGADO', 'Asesor intentó acceder a grupo que no le corresponde', { grupoId: req.params.id, userId: req.user.id });
             return res.status(403).json({ message: "No tienes permiso para ver este grupo" });
         }
 
-        if (req.user.role === 'coordinador') {
+        if (role === 'coordinador') {
             const coordId = await obtenerCoordinacionId(req.user);
-            const userCoordStr = coordId ? coordId.toString() : '';
-            const grupoCoordStr = grupo.coordinacion?._id ? grupo.coordinacion._id.toString() : (grupo.coordinacion ? grupo.coordinacion.toString() : '');
+            const userCoordStr = extraerIdStr(coordId);
+            const grupoCoordStr = extraerIdStr(grupo.coordinacion) || extraerIdStr(grupo.asesor?.coordinacion);
+            const grupoAsesorIdStr = extraerIdStr(grupo.asesor);
 
-            let pertenece = (grupoCoordStr && grupoCoordStr === userCoordStr);
-            if (!pertenece && grupo.asesor) {
-                const asesorId = grupo.asesor._id || grupo.asesor;
-                const asesorDoc = await User.findById(asesorId).select('coordinacion').lean();
-                if (asesorDoc && asesorDoc.coordinacion && asesorDoc.coordinacion.toString() === userCoordStr) {
-                    pertenece = true;
-                }
+            let pertenece = !userCoordStr || (grupoCoordStr && grupoCoordStr === userCoordStr) || (grupoAsesorIdStr && grupoAsesorIdStr === String(req.user.id));
+
+            if (!pertenece && grupoAsesorIdStr) {
+                const asesoresCoord = await getAsesoresDeCoordinacion(userCoordStr, req.user.id);
+                pertenece = asesoresCoord.some(id => String(id) === grupoAsesorIdStr);
             }
 
             if (!pertenece) {
@@ -126,38 +161,40 @@ exports.getGrupoById = async (req, res) => {
         logError(req, 'GET_GRUPO_BY_ID_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getGruposPorCoordinacion = async (req, res) => {
     try {
         const { coordinacion } = req.params;
         const query = await buildFiltroCoordinacion(coordinacion);
-        const grupos = await Grupo.find(query)
-            .populate('asesor', 'username nombre')
-            .populate('coordinacion', 'nombre')
-            .populate('integrantes');
+        const gruposRaw = await Grupo.find(query)
+            .populate('asesor', 'username nombre role coordinacion')
+            .populate('integrantes')
+            .lean();
 
+        const grupos = await normalizarGrupos(gruposRaw);
         res.status(200).json(grupos);
     } catch (error) {
         logError(req, 'GET_GRUPOS_COORD_ERROR', error, { coordinacion: req.params.coordinacion });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getGruposPorAsesor = async (req, res) => {
     try {
         const { asesor } = req.params;
-        const grupos = await Grupo.find({ asesor: asesor })
-            .populate('asesor', 'username nombre')
-            .populate('coordinacion', 'nombre')
-            .populate('integrantes');
+        const gruposRaw = await Grupo.find({ asesor: asesor })
+            .populate('asesor', 'username nombre role coordinacion')
+            .populate('integrantes')
+            .lean();
 
+        const grupos = await normalizarGrupos(gruposRaw);
         res.status(200).json(grupos);
     } catch (error) {
         logError(req, 'GET_GRUPOS_ASESOR_ERROR', error, { asesor: req.params.asesor });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.updateGrupo = async (req, res) => {
     try {
@@ -171,6 +208,13 @@ exports.updateGrupo = async (req, res) => {
         if (!grupoAnterior) {
             logWarn(req, 'ACTUALIZAR_GRUPO_NOT_FOUND', 'Grupo no encontrado para actualizar', { id: req.params.id, body: req.body });
             return res.status(404).json({ message: "Grupo no encontrado" });
+        }
+
+        if (!req.body.coordinacion && req.body.asesor && mongoose.Types.ObjectId.isValid(req.body.asesor)) {
+            const asesorDoc = await User.findById(req.body.asesor).select('coordinacion').lean();
+            if (asesorDoc && asesorDoc.coordinacion) {
+                req.body.coordinacion = asesorDoc.coordinacion;
+            }
         }
 
         const grupo = await Grupo.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -191,7 +235,7 @@ exports.updateGrupo = async (req, res) => {
         logError(req, 'ACTUALIZAR_GRUPO_ERROR', error, { id: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.deleteGrupo = async (req, res) => {
     try {
@@ -220,7 +264,7 @@ exports.deleteGrupo = async (req, res) => {
         logError(req, 'ELIMINAR_GRUPO_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.addMiembroAGrupo = async (req, res) => {
     try {
@@ -256,8 +300,7 @@ exports.addMiembroAGrupo = async (req, res) => {
         logError(req, 'AGREGAR_MIEMBRO_GRUPO_ERROR', error, { grupoId: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
     }
-}
-
+};
 
 exports.getCicloSemanaGrupo = async (req, res) => {
     try {
@@ -320,14 +363,13 @@ exports.getCicloSemanaGrupo = async (req, res) => {
     }
 };
 
-
 exports.obtenerAsesorGrupo = async (req, res) => {
     try {
         const { grupoId } = req.params;
         const grupo = await Grupo.findById(grupoId)
-            .populate('asesor', 'username nombre');
+            .populate('asesor', 'username nombre role coordinacion');
         res.status(200).json(grupo);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
-}
+};

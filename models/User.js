@@ -19,14 +19,14 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'asesor', 'coordinador', 'master', 'supervisor', 'superadmin', 'lector'],
+    enum: ['admin', 'asesor', 'coordinador', 'master', 'supervisor', 'superadmin', 'lector', 'gerencia'],
     default: 'asesor'
   },
   coordinacion: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Coordinacion',
     required: function () {
-      return this.role === 'asesor' || this.role === 'coordinador';
+      return this.role === 'asesor' || this.role === 'coordinador' || this.role === 'master';
     }
   },
   lastLocation: {

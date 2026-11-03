@@ -1,15 +1,44 @@
+const mongoose = require('mongoose');
 const Cliente = require('../models/Cliente');
 const Usuario = require('../models/User');
 const Credito = require('../models/Credito');
+const Grupo = require('../models/Grupo');
+const Coordinacion = require('../models/Coordinacion');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
-const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { normalizarRol, extraerIdStr, obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+
+/**
+ * Resuelve la coordinación para un cliente (desde asesor, grupo o usuario creador).
+ */
+async function resolverCoordinacionCliente(body, reqUser) {
+    if (body.coordinacion && mongoose.Types.ObjectId.isValid(String(body.coordinacion))) {
+        return body.coordinacion;
+    }
+    if (body.asesor && mongoose.Types.ObjectId.isValid(String(body.asesor))) {
+        const asesorDoc = await Usuario.findById(body.asesor).select('coordinacion').lean();
+        if (asesorDoc && asesorDoc.coordinacion) return asesorDoc.coordinacion;
+    }
+    if (body.grupo && mongoose.Types.ObjectId.isValid(String(body.grupo))) {
+        const grupoDoc = await Grupo.findById(body.grupo).select('coordinacion').lean();
+        if (grupoDoc && grupoDoc.coordinacion) return grupoDoc.coordinacion;
+    }
+    if (reqUser?.coordinacion && mongoose.Types.ObjectId.isValid(String(reqUser.coordinacion))) {
+        return reqUser.coordinacion;
+    }
+    return undefined;
+}
 
 exports.createCliente = async (req, res) => {
     try {
-        const userRole = req.user?.role;
+        const userRole = normalizarRol(req.user?.role);
         if (!['admin', 'master', 'superadmin'].includes(userRole)) {
             logWarn(req, 'CREAR_CLIENTE_DENEGADO', `Permisos insuficientes para crear cliente (Rol: ${userRole})`, { body: req.body });
             return res.status(403).json({ message: "No tienes permisos para crear clientes" });
+        }
+
+        const coordResuelta = await resolverCoordinacionCliente(req.body, req.user);
+        if (coordResuelta) {
+            req.body.coordinacion = coordResuelta;
         }
 
         const cliente = new Cliente(req.body);
@@ -18,7 +47,7 @@ exports.createCliente = async (req, res) => {
         logAccion(req, 'CREAR_CLIENTE', {
             descripcion: `Cliente creado: "${cliente.nombre}" (ID: ${cliente._id})`,
             datos: req.body,
-            resultado: { clienteId: cliente._id, nombre: cliente.nombre, asesor: cliente.asesor, grupo: cliente.grupo }
+            resultado: { clienteId: cliente._id, nombre: cliente.nombre, asesor: cliente.asesor, grupo: cliente.grupo, coordinacion: cliente.coordinacion }
         });
 
         res.status(201).json(cliente);
@@ -26,13 +55,12 @@ exports.createCliente = async (req, res) => {
         logError(req, 'CREAR_CLIENTE_ERROR', error, { body: req.body });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getCliente = async (req, res) => {
     try {
         let query = {};
-        const mongoose = require('mongoose');
-        const role = req.user?.role ? req.user.role.toLowerCase() : '';
+        const role = normalizarRol(req.user?.role);
         const userId = req.user?.id;
 
         // 1. Filtrado por asesor explícito en query o por rol
@@ -60,20 +88,33 @@ exports.getCliente = async (req, res) => {
         }
         // Si es admin o master, query = {} (ve todo o filtra por ?asesor= si se indica)
 
-        const clientes = await Cliente.find(query)
-            .select({
-                nombre: 1,
-                grupo: 1,
-                horaVisita: 1,
-                diaPago: 1,
-                tipoPago: 1,
-                coordinacion: 1,
-                asesor: 1,
-                clave: 1
-            })
-            .populate('coordinacion', 'nombre')
-            .populate('asesor', 'username nombre coordinacion')
-            .lean();
+        const [clientes, coordinaciones] = await Promise.all([
+            Cliente.find(query)
+                .select({
+                    nombre: 1,
+                    grupo: 1,
+                    horaVisita: 1,
+                    diaPago: 1,
+                    tipoPago: 1,
+                    coordinacion: 1,
+                    asesor: 1,
+                    clave: 1
+                })
+                .populate('asesor', 'username nombre role coordinacion')
+                .lean(),
+            Coordinacion.find({}, { nombre: 1 }).lean()
+        ]);
+
+        const coordMap = new Map(coordinaciones.map(c => [String(c._id), c]));
+        clientes.forEach(c => {
+            if (c.asesor && typeof c.asesor === 'object') {
+                c.asesor.role = normalizarRol(c.asesor.role);
+            }
+            const cCoordId = extraerIdStr(c.coordinacion) || extraerIdStr(c.asesor?.coordinacion);
+            if (cCoordId) {
+                c.coordinacion = coordMap.get(cCoordId) || { _id: cCoordId, nombre: 'Coordinación' };
+            }
+        });
 
         // Si se solicita adjuntar el crédito activo (optimización masiva: 1 sola petición)
         if (req.query.conCredito === 'true') {
@@ -83,6 +124,7 @@ exports.getCliente = async (req, res) => {
                 tipoCredito: 'Individual'
             }).select({
                 cliente: 1,
+                ciclo: 1,
                 pagoPactado: 1,
                 saldoTotal: 1,
                 saldoPendiente: 1,
@@ -140,18 +182,21 @@ exports.getCliente = async (req, res) => {
 
 exports.getClientePorId = async (req, res) => {
     try {
-        const userRole = req.user?.role?.toLowerCase();
+        const userRole = normalizarRol(req.user?.role);
         if (!['admin', 'master', 'superadmin', 'lector', 'asesor', 'coordinador'].includes(userRole)) {
             logWarn(req, 'GET_CLIENTE_POR_ID_DENEGADO', `Permisos insuficientes para consultar cliente (Rol: ${userRole})`, { id: req.params.id });
             return res.status(403).json({ message: "No tienes permisos para obtener clientes" });
         }
         const cliente = await Cliente.findById(req.params.id)
             .populate('coordinacion', 'nombre')
-            .populate('asesor', 'username nombre')
+            .populate('asesor', 'username nombre role coordinacion')
             .lean();
         if (!cliente) {
             logWarn(req, 'GET_CLIENTE_NOT_FOUND', 'Cliente no encontrado por ID', { id: req.params.id });
             return res.status(404).json({ message: "Cliente no encontrado" });
+        }
+        if (cliente.asesor && typeof cliente.asesor === 'object') {
+            cliente.asesor.role = normalizarRol(cliente.asesor.role);
         }
         res.status(200).json(cliente);
     } catch (error) {
@@ -162,11 +207,17 @@ exports.getClientePorId = async (req, res) => {
 
 exports.updateCliente = async (req, res) => {
     try {
-        const userRole = req.user?.role;
+        const userRole = normalizarRol(req.user?.role);
         if (!['admin', 'master', 'superadmin'].includes(userRole)) {
             logWarn(req, 'ACTUALIZAR_CLIENTE_DENEGADO', `Permisos insuficientes para actualizar cliente (Rol: ${userRole})`, { id: req.params.id });
             return res.status(403).json({ message: "No tienes permisos para actualizar clientes" });
         }
+
+        const coordResuelta = await resolverCoordinacionCliente(req.body, req.user);
+        if (coordResuelta) {
+            req.body.coordinacion = coordResuelta;
+        }
+
         const cliente = await Cliente.findByIdAndUpdate(req.params.id, req.body, { new: true });
         if (!cliente) {
             logWarn(req, 'ACTUALIZAR_CLIENTE_NOT_FOUND', 'Intento de actualizar cliente inexistente', { id: req.params.id, body: req.body });
@@ -184,11 +235,11 @@ exports.updateCliente = async (req, res) => {
         logError(req, 'ACTUALIZAR_CLIENTE_ERROR', error, { id: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.deleteCliente = async (req, res) => {
     try {
-        const userRole = req.user?.role;
+        const userRole = normalizarRol(req.user?.role);
         if (!['admin', 'master', 'superadmin'].includes(userRole)) {
             logWarn(req, 'ELIMINAR_CLIENTE_DENEGADO', `Permisos insuficientes para eliminar cliente (Rol: ${userRole})`, { id: req.params.id });
             return res.status(403).json({ message: "No tienes permisos para eliminar clientes" });
@@ -210,7 +261,7 @@ exports.deleteCliente = async (req, res) => {
         logError(req, 'ELIMINAR_CLIENTE_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
     }
-}
+};
 
 exports.getClientesMaster = async (req, res) => {
     try {
@@ -225,7 +276,7 @@ exports.getClientesMaster = async (req, res) => {
         // Buscar clientes cuyo asesor sea un master
         const clientes = await Cliente.find({
             asesor: { $in: idsMasters }
-        }).populate('asesor', 'nombre username');
+        }).populate('asesor', 'nombre username role coordinacion');
 
         res.status(200).json({
             success: true,
