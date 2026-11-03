@@ -313,7 +313,7 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
 
                 return {
                     _id: cliente._id,
-                    nombre: cliente,
+                    nombre: cliente.nombre,
                     grupo: nombreGrupo,
                     diaPago: cliente.diaPago,
                     tipoPago: cliente.tipoPago,
