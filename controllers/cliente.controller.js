@@ -255,7 +255,7 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
                 populate: [
                     {
                         path: 'asesor',
-                        select: '_id usernaame nombre coordinacion',
+                        select: '_id username nombre coordinacion',
                         populate: { path: 'coordinacion', select: '_id nombre' }
                     },
                     { path: 'coordinacion', select: '_id nombre' }
