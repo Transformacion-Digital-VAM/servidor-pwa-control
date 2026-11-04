@@ -14,6 +14,7 @@ router.get('/get/coordinacion/:coordinacion', verifyToken, grupoController.getGr
 // obtener grupos por asesor
 router.get('/get/asesor/:asesor', grupoController.getGruposPorAsesor); //verifyToken
 router.put('/update/:id', verifyToken, grupoController.updateGrupo); //verifyToken
+router.put('/validar/:id', verifyToken, grupoController.validarGrupo); //verifyToken
 router.delete('/delete/:id', verifyToken, grupoController.deleteGrupo); //verifyToken
 router.post('/add-miembro/:id', verifyToken, grupoController.addMiembroAGrupo); //verifyToken
 router.post('/:id/integrantes', verifyToken, grupoController.addMiembroAGrupo); //verifyToken

@@ -31,6 +31,18 @@ const clienteSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         required: true
+    },
+    validada: {
+        type: Boolean,
+        default: false
+    },
+    validadaPor: {
+        type: String,
+        default: null
+    },
+    fechaValidacion: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 

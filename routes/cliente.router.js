@@ -9,6 +9,7 @@ router.get('/miembros-grupo-con-individual', clienteController.getMiembrosGrupoC
 router.post('/', verifyToken, clienteController.createCliente); //verifyToken
 router.get('/', verifyToken, clienteController.getCliente); //verifyToken
 router.get('/:id', verifyToken, clienteController.getClientePorId); //verifyToken
+router.put('/validar/:id', verifyToken, clienteController.validarCliente); //verifyToken
 router.put('/:id', verifyToken, clienteController.updateCliente); //verifyToken
 router.delete('/:id', verifyToken, clienteController.deleteCliente); //verifyToken
 

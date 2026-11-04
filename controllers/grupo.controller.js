@@ -21,6 +21,9 @@ const formatGrupoData = (grupo) => {
         integrantes: g.integrantes || [],
         coordinacion: g.coordinacion,
         asesor: g.asesor,
+        validada: !!g.validada,
+        validadaPor: g.validadaPor || null,
+        fechaValidacion: g.fechaValidacion || null,
         createdAt: g.createdAt,
         updatedAt: g.updatedAt
     };
@@ -360,6 +363,37 @@ exports.getCicloSemanaGrupo = async (req, res) => {
             message: 'Error interno del servidor',
             error: error.message
         });
+    }
+};
+
+exports.validarGrupo = async (req, res) => {
+    try {
+        const role = normalizarRol(req.user?.role);
+        if (!['coordinador', 'admin', 'master', 'superadmin'].includes(role)) {
+            return res.status(403).json({ message: "Solo el coordinador o administrador puede validar la hoja" });
+        }
+
+        const grupo = await Grupo.findById(req.params.id);
+        if (!grupo) {
+            return res.status(404).json({ message: "Grupo no encontrado" });
+        }
+
+        const validada = req.body.validada !== undefined ? Boolean(req.body.validada) : !grupo.validada;
+        let nombreValidador = req.user?.nombre || req.user?.username || 'COP';
+        if (req.user?.id && !req.user?.nombre) {
+            const userDoc = await User.findById(req.user.id).select('nombre username').lean();
+            if (userDoc) nombreValidador = userDoc.nombre || userDoc.username || nombreValidador;
+        }
+
+        grupo.validada = validada;
+        grupo.validadaPor = validada ? nombreValidador : null;
+        grupo.fechaValidacion = validada ? new Date() : null;
+        await grupo.save();
+
+        res.status(200).json(grupo);
+    } catch (error) {
+        logError(req, 'VALIDAR_GRUPO_ERROR', error, { id: req.params.id });
+        res.status(500).json({ message: error.message });
     }
 };
 

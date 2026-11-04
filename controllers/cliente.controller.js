@@ -98,7 +98,10 @@ exports.getCliente = async (req, res) => {
                     tipoPago: 1,
                     coordinacion: 1,
                     asesor: 1,
-                    clave: 1
+                    clave: 1,
+                    validada: 1,
+                    validadaPor: 1,
+                    fechaValidacion: 1
                 })
                 .populate('asesor', 'username nombre role coordinacion')
                 .lean(),
@@ -292,6 +295,37 @@ exports.getClientesMaster = async (req, res) => {
     }
 };
 
+exports.validarCliente = async (req, res) => {
+    try {
+        const role = normalizarRol(req.user?.role);
+        if (!['coordinador', 'admin', 'master', 'superadmin'].includes(role)) {
+            return res.status(403).json({ message: "Solo el coordinador o administrador puede validar la hoja" });
+        }
+
+        const cliente = await Cliente.findById(req.params.id);
+        if (!cliente) {
+            return res.status(404).json({ message: "Cliente no encontrado" });
+        }
+
+        const validada = req.body.validada !== undefined ? Boolean(req.body.validada) : !cliente.validada;
+        let nombreValidador = req.user?.nombre || req.user?.username || 'COP';
+        if (req.user?.id && !req.user?.nombre) {
+            const userDoc = await Usuario.findById(req.user.id).select('nombre username').lean();
+            if (userDoc) nombreValidador = userDoc.nombre || userDoc.username || nombreValidador;
+        }
+
+        cliente.validada = validada;
+        cliente.validadaPor = validada ? nombreValidador : null;
+        cliente.fechaValidacion = validada ? new Date() : null;
+        await cliente.save();
+
+        res.status(200).json(cliente);
+    } catch (error) {
+        logError(req, 'VALIDAR_CLIENTE_ERROR', error, { id: req.params.id });
+        res.status(500).json({ message: error.message });
+    }
+};
+
 exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
     try {
         const { estado = 'Activo', grupoId } = req.query;
@@ -303,7 +337,13 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
         };
 
         const creditosInd = await Credito.find(creditoQuery)
-            .populate('cliente')
+            .populate({
+                path: 'cliente',
+                populate: [
+                    { path: 'asesor', select: 'username nombre role coordinacion' },
+                    { path: 'coordinacion', select: 'nombre' }
+                ]
+            })
             .lean();
 
         // Filtrar solo aquellos cuyo cliente tenga un grupo asignado (no vacío ni N/A)
@@ -321,6 +361,8 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
                 grupo: c.cliente.grupo,
                 diaPago: c.cliente.diaPago,
                 tipoPago: c.cliente.tipoPago,
+                asesor: c.cliente.asesor || null,
+                coordinacion: c.cliente.coordinacion || c.cliente.asesor?.coordinacion || null,
                 creditoIndividual: {
                     _id: c._id,
                     ciclo: c.ciclo,
