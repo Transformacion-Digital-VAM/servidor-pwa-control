@@ -6,11 +6,13 @@ const { verifyToken } = require('../middlewares/auth.middleware');
 
 router.get('/clientes-master', clienteController.getClientesMaster);
 router.get('/miembros-grupo-con-individual', clienteController.getMiembrosGrupoConCreditoIndividual);
+router.get('/grupo-con-individual', clienteController.getGruposConMiembrosClientes);
 router.post('/', verifyToken, clienteController.createCliente); //verifyToken
 router.get('/', verifyToken, clienteController.getCliente); //verifyToken
 router.get('/:id', verifyToken, clienteController.getClientePorId); //verifyToken
 router.put('/validar/:id', verifyToken, clienteController.validarCliente); //verifyToken
 router.put('/:id', verifyToken, clienteController.updateCliente); //verifyToken
 router.delete('/:id', verifyToken, clienteController.deleteCliente); //verifyToken
+
 
 module.exports = router;
