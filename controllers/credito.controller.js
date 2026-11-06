@@ -4,6 +4,7 @@ const Grupo = require('../models/Grupo');
 const Cliente = require('../models/Cliente');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { obtenerDiaSemana } = require('../helpers/fechas');
 
 /** 
  * CRUD DE CREDITOS
@@ -166,6 +167,20 @@ exports.crearCredito = async (req, res) => {
             updateDoc,
             { upsert: true, new: true, runValidators: true }
         );
+
+        if (fechaPrimerPago) {
+            const diaDetectado = obtenerDiaSemana(fechaPrimerPago);
+            if (diaDetectado) {
+                if (tipoCredito === 'Individual' && cliente) {
+                    await Cliente.findByIdAndUpdate(cliente, { diaPago: diaDetectado, diaVisita: diaDetectado });
+                } else if (miembro) {
+                    const miembroDoc = await Miembro.findById(miembro).select('grupo').lean();
+                    if (miembroDoc && miembroDoc.grupo) {
+                        await Grupo.findByIdAndUpdate(miembroDoc.grupo, { diaVisita: diaDetectado, diaPago: diaDetectado });
+                    }
+                }
+            }
+        }
 
         logAccion(req, 'GUARDAR_CREDITO', {
             descripcion: `Crédito ${tipoCredito} (Ciclo ${ciclo}) guardado/actualizado para ${tipoCredito === 'Individual' ? 'Cliente ' + cliente : 'Miembro ' + miembro} - Monto: $${montoSolicitado}`,
@@ -598,6 +613,21 @@ exports.actualizarCredito = async (req, res) => {
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
+        }
+
+        if (datosActualizar.fechaPrimerPago || datosActualizar.diaPago) {
+            const diaFinal = datosActualizar.diaPago || (datosActualizar.fechaPrimerPago ? obtenerDiaSemana(datosActualizar.fechaPrimerPago) : undefined);
+            if (diaFinal) {
+                if (creditoActualizado.cliente) {
+                    await Cliente.findByIdAndUpdate(creditoActualizado.cliente, { diaPago: diaFinal, diaVisita: diaFinal });
+                }
+                if (creditoActualizado.miembro) {
+                    const miembroDoc = await Miembro.findById(creditoActualizado.miembro).select('grupo').lean();
+                    if (miembroDoc && miembroDoc.grupo) {
+                        await Grupo.findByIdAndUpdate(miembroDoc.grupo, { diaVisita: diaFinal, diaPago: diaFinal });
+                    }
+                }
+            }
         }
 
         logAccion(req, 'ACTUALIZAR_CREDITO', {

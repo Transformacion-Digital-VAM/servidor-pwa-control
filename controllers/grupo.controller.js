@@ -1,10 +1,12 @@
 const mongoose = require('mongoose');
 const Grupo = require('../models/Grupo');
 const Credito = require('../models/Credito');
+const Cliente = require('../models/Cliente');
 const User = require('../models/User');
 const Coordinacion = require('../models/Coordinacion');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 const { normalizarRol, extraerIdStr, obtenerCoordinacionId, getAsesoresDeCoordinacion, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { obtenerDiaSemana } = require('../helpers/fechas');
 
 /**
  * Función auxiliar para extraer todos los datos del modelo Grupo
@@ -16,7 +18,8 @@ const formatGrupoData = (grupo) => {
         _id: g._id,
         nombre: g.nombre,
         clave: g.clave,
-        diaVisita: g.diaVisita,
+        diaVisita: g.diaVisita || g.diaPago,
+        diaPago: g.diaPago || g.diaVisita,
         horaVisita: g.horaVisita,
         integrantes: g.integrantes || [],
         coordinacion: g.coordinacion,
@@ -67,6 +70,12 @@ exports.createGrupo = async (req, res) => {
         }
         if (!req.body.coordinacion && req.user?.coordinacion && mongoose.Types.ObjectId.isValid(String(req.user.coordinacion))) {
             req.body.coordinacion = req.user.coordinacion;
+        }
+
+        const diaFinal = req.body.diaPago || req.body.diaVisita || (req.body.fechaPrimerPago ? obtenerDiaSemana(req.body.fechaPrimerPago) : undefined);
+        if (diaFinal) {
+            req.body.diaVisita = diaFinal;
+            req.body.diaPago = diaFinal;
         }
 
         const grupo = new Grupo(req.body);
@@ -220,7 +229,19 @@ exports.updateGrupo = async (req, res) => {
             }
         }
 
+        const diaFinal = req.body.diaPago || req.body.diaVisita || (req.body.fechaPrimerPago ? obtenerDiaSemana(req.body.fechaPrimerPago) : undefined);
+        if (diaFinal) {
+            req.body.diaVisita = diaFinal;
+            req.body.diaPago = diaFinal;
+        }
+
         const grupo = await Grupo.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (diaFinal) {
+            await Cliente.updateMany(
+                { $or: [{ grupo: String(req.params.id) }, { grupo: grupo.nombre }] },
+                { $set: { diaPago: diaFinal, diaVisita: diaFinal } }
+            );
+        }
         const datosGrupo = formatGrupoData(grupo);
 
         logAccion(req, 'ACTUALIZAR_GRUPO', {

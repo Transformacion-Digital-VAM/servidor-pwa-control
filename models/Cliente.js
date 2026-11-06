@@ -18,6 +18,10 @@ const clienteSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    diaVisita: {
+        type: String,
+        required: false
+    },
     tipoPago: {
         type: String,
         enum: ['Mensual', 'Quincenal', 'Semanal', 'Bisemanal'],

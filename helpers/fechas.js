@@ -47,4 +47,25 @@ function generarCalendarioPagos(fechaPrimerPago, semanas, frecuenciaPago = 'Sema
     return fechas;
 }
 
-module.exports = { generarCalendarioPagos };
+function obtenerDiaSemana(fecha) {
+    if (!fecha) return '';
+    const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    if (typeof fecha === 'string') {
+        const partes = fecha.split('T')[0].split('-');
+        if (partes.length === 3) {
+            const year = parseInt(partes[0], 10);
+            const month = parseInt(partes[1], 10) - 1;
+            const day = parseInt(partes[2], 10);
+            if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                const d = new Date(year, month, day);
+                return dias[d.getDay()] || '';
+            }
+        }
+    }
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) return '';
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+    return dias[d.getDay()] || '';
+}
+
+module.exports = { generarCalendarioPagos, obtenerDiaSemana };

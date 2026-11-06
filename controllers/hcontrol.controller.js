@@ -289,8 +289,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
         }
 
         // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC/8S + REFILL O MÚLTIPLES) ---
-        // Si un miembro tiene crédito base (CC u 8S) y Refill (R), se consolidan en un único registro
-        // para que aparezca una sola vez en la hoja de control con todo el historial unificado de pagos.
+        // Determinar periodo o tipo de hoja solicitada
+        const semanaInicioQuery = req.query.semanaInicio;
+        const semanaFinQuery = req.query.semanaFin ? parseInt(req.query.semanaFin) : null;
+        const esHojaCompleta = !semanaInicioQuery || semanaInicioQuery === 'completa';
+        const inicioNum = parseInt(semanaInicioQuery) || 1;
+        const esPeriodo1 = !esHojaCompleta && inicioNum >= 1 && (semanaFinQuery ? semanaFinQuery <= 8 : inicioNum <= 8);
+        const esPeriodo2 = !esHojaCompleta && inicioNum >= 9;
+
         const creditosPorMiembro = new Map();
         creditosRaw.forEach(c => {
             if (c.estado === 'Cancelado') return;
@@ -301,80 +307,157 @@ exports.generarHojaControlGrupal = async (req, res) => {
             creditosPorMiembro.get(mId).push(c);
         });
 
+        const procesarCreditosMiembro = (list) => {
+            if (!list || list.length === 0) return null;
+
+            if (list.length === 1) {
+                const cObj = list[0].toObject ? list[0].toObject() : { ...list[0] };
+                if (esPeriodo2 && (cObj.tipoCredito === 'R' || cObj.tipoCredito === '8S' || Number(cObj.semanas) <= 8)) {
+                    if (Array.isArray(cObj.pagos)) {
+                        cObj.pagos = cObj.pagos.map(p => {
+                            const num = Number(p.numeroPago) || 0;
+                            return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
+                        });
+                    }
+                }
+                return cObj;
+            }
+
+            // Orden cronológico: list[0] = primer crédito, list[list.length - 1] = último crédito
+            list.sort((a, b) => {
+                const timeA = new Date(a.createdAt || a.fechaPrimerPago || 0).getTime();
+                const timeB = new Date(b.createdAt || b.fechaPrimerPago || 0).getTime();
+                return timeA - timeB;
+            });
+
+            const primerCredito = list[0].toObject ? list[0].toObject() : { ...list[0] };
+            const ultimoCredito = list[list.length - 1].toObject ? list[list.length - 1].toObject() : { ...list[list.length - 1] };
+            const creditoActivo = (list.find(c => c.estado === 'Activo') || list[list.length - 1]).toObject
+                ? (list.find(c => c.estado === 'Activo') || list[list.length - 1]).toObject()
+                : { ...(list.find(c => c.estado === 'Activo') || list[list.length - 1]) };
+
+            // 1. Periodo 1 (semanas 1 a 8): Tomar el primer crédito del ciclo
+            if (esPeriodo1) {
+                return primerCredito;
+            }
+
+            // 2. Periodo 2 (semanas 9 a 16): Tomar el crédito activo o último del ciclo
+            if (esPeriodo2) {
+                const objP2 = { ...creditoActivo };
+                if (Array.isArray(objP2.pagos)) {
+                    objP2.pagos = objP2.pagos.map(p => {
+                        const num = Number(p.numeroPago) || 0;
+                        return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
+                    });
+                }
+                return objP2;
+            }
+
+            // 3. Hoja Completa: Se visualizan ambos créditos en las 16 semanas.
+            // Los datos del miembro (pagoPactado, saldoTotal, saldoPendiente, tipoCredito)
+            // deben ser los del ÚLTIMO CRÉDITO.
+            const objPrincipal = { ...creditoActivo };
+
+            const todosLosPagos = [];
+            const pagosIdsVistos = new Set();
+
+            // Pagos del primer crédito (semanas 1-8)
+            (primerCredito.pagos || []).forEach(p => {
+                const num = Number(p.numeroPago) || 0;
+                if (num <= 8) {
+                    const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                    if (!pagosIdsVistos.has(pId)) {
+                        pagosIdsVistos.add(pId);
+                        todosLosPagos.push(p);
+                    }
+                }
+            });
+
+            // Pagos del último crédito (semanas 9-16, mapeando pagos 1..8 a 9..16 si aplica)
+            (ultimoCredito.pagos || []).forEach(p => {
+                const pCopy = { ...p };
+                const num = Number(pCopy.numeroPago) || 0;
+                if (num > 0 && num <= 8) {
+                    pCopy.numeroPago = num + 8;
+                }
+                const pId = pCopy._id ? pCopy._id.toString() : `${pCopy.numeroPago}_${pCopy.fechaPago}_${pCopy.montoPagado}`;
+                if (!pagosIdsVistos.has(pId)) {
+                    pagosIdsVistos.add(pId);
+                    todosLosPagos.push(pCopy);
+                }
+            });
+
+            // Si hay pagos de otros créditos de la lista
+            list.forEach(c => {
+                const cObj = c.toObject ? c.toObject() : { ...c };
+                if (cObj._id?.toString() !== primerCredito._id?.toString() && cObj._id?.toString() !== ultimoCredito._id?.toString()) {
+                    (cObj.pagos || []).forEach(p => {
+                        const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                        if (!pagosIdsVistos.has(pId)) {
+                            pagosIdsVistos.add(pId);
+                            todosLosPagos.push(p);
+                        }
+                    });
+                }
+            });
+
+            todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+
+            // Ahorros combinados
+            const todosPagosAhorro = [];
+            const ahorroIdsVistos = new Set();
+            let sumaAhorroTotal = 0;
+
+            list.forEach(c => {
+                const cObj = c.toObject ? c.toObject() : { ...c };
+                if (cObj.ahorro) {
+                    if (Array.isArray(cObj.ahorro.pagosAhorro)) {
+                        cObj.ahorro.pagosAhorro.forEach(a => {
+                            const aCopy = { ...a };
+                            if (cObj._id?.toString() === ultimoCredito._id?.toString()) {
+                                const numA = Number(aCopy.numeroPago) || 0;
+                                if (numA > 0 && numA <= 8) {
+                                    aCopy.numeroPago = numA + 8;
+                                }
+                            }
+                            const aId = aCopy._id ? aCopy._id.toString() : `${aCopy.numeroPago}_${aCopy.fecha}_${aCopy.monto}`;
+                            if (!ahorroIdsVistos.has(aId)) {
+                                ahorroIdsVistos.add(aId);
+                                todosPagosAhorro.push(aCopy);
+                            }
+                        });
+                    }
+                    sumaAhorroTotal += (Number(cObj.ahorro.montoTotal) || 0);
+                }
+            });
+            todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+
+            return {
+                ...objPrincipal,
+                _id: objPrincipal._id,
+                tipoCredito: objPrincipal.tipoCredito || (ultimoCredito.tipoCredito === 'R' ? 'R' : primerCredito.tipoCredito),
+                semanas: 16,
+                pagos: todosLosPagos,
+                ahorro: {
+                    montoTotal: Math.max(sumaAhorroTotal, objPrincipal.ahorro?.montoTotal || 0),
+                    pagosAhorro: todosPagosAhorro
+                },
+                garantia: (objPrincipal.garantia > 0) ? objPrincipal.garantia : (primerCredito?.garantia || 0),
+                fechaPrimerPago: primerCredito?.fechaPrimerPago || objPrincipal.fechaPrimerPago,
+                frecuenciaPago: primerCredito?.frecuenciaPago || objPrincipal.frecuenciaPago || 'Semanal',
+                pagoPactado: objPrincipal.pagoPactado !== undefined ? objPrincipal.pagoPactado : (ultimoCredito.pagoPactado || 0),
+                saldoTotal: objPrincipal.saldoTotal !== undefined ? objPrincipal.saldoTotal : (ultimoCredito.saldoTotal || 0),
+                saldoPendiente: objPrincipal.saldoPendiente !== undefined ? objPrincipal.saldoPendiente : (ultimoCredito.saldoPendiente || 0)
+            };
+        };
+
         const creditos = [];
         miembros.forEach(m => {
             const mId = m._id.toString();
             const list = creditosPorMiembro.get(mId);
             if (!list || list.length === 0) return; // Excluye miembros que no tienen crédito en este ciclo
-
-            if (list.length === 1) {
-                const c = list[0];
-                creditos.push(c.toObject ? c.toObject() : { ...c });
-            } else {
-                // Múltiples créditos en el mismo ciclo para el miembro (ej. CC + R, 8S + R, etc.)
-                const creditoR = list.find(c => c.tipoCredito === 'R' || c.esRefill);
-                const creditoBase = list.find(c => c.tipoCredito === 'CC' || c.tipoCredito === '8S') || list.find(c => c.tipoCredito !== 'R') || list[0];
-
-                const objR = creditoR ? (creditoR.toObject ? creditoR.toObject() : { ...creditoR }) : null;
-                const objBase = creditoBase ? (creditoBase.toObject ? creditoBase.toObject() : { ...creditoBase }) : (list[0].toObject ? list[0].toObject() : { ...list[0] });
-
-                // Combinar TODOS los pagos de semanas 1-8 y 9-16 (o todos los que existan)
-                const todosLosPagos = [];
-                const todosPagosAhorro = [];
-                let sumaAhorroTotal = 0;
-                const pagosIdsVistos = new Set();
-                const ahorroIdsVistos = new Set();
-
-                list.forEach(c => {
-                    const obj = c.toObject ? c.toObject() : { ...c };
-                    if (Array.isArray(obj.pagos)) {
-                        obj.pagos.forEach(p => {
-                            const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
-                            if (!pagosIdsVistos.has(pId)) {
-                                pagosIdsVistos.add(pId);
-                                todosLosPagos.push(p);
-                            }
-                        });
-                    }
-                    if (obj.ahorro) {
-                        if (Array.isArray(obj.ahorro.pagosAhorro)) {
-                            obj.ahorro.pagosAhorro.forEach(a => {
-                                const aId = a._id ? a._id.toString() : `${a.numeroPago}_${a.fecha}_${a.monto}`;
-                                if (!ahorroIdsVistos.has(aId)) {
-                                    ahorroIdsVistos.add(aId);
-                                    todosPagosAhorro.push(a);
-                                }
-                            });
-                        }
-                        sumaAhorroTotal += (Number(obj.ahorro.montoTotal) || 0);
-                    }
-                });
-
-                todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
-                todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
-
-                const objPrincipal = objR || objBase;
-                const maxSemanasMiembro = Math.max(...list.map(c => Number(c.semanas) || (c.tipoCredito === '8S' ? 8 : 16)), 16);
-
-                const consolidado = {
-                    ...objPrincipal,
-                    _id: objPrincipal._id,
-                    tipoCredito: objR ? 'R' : objBase.tipoCredito,
-                    semanas: maxSemanasMiembro,
-                    pagos: todosLosPagos,
-                    ahorro: {
-                        montoTotal: Math.max(sumaAhorroTotal, objPrincipal.ahorro?.montoTotal || 0),
-                        pagosAhorro: todosPagosAhorro
-                    },
-                    garantia: (objR && objR.garantia > 0) ? objR.garantia : (objBase?.garantia || 0),
-                    fechaPrimerPago: objBase?.fechaPrimerPago || objPrincipal.fechaPrimerPago,
-                    frecuenciaPago: objBase?.frecuenciaPago || objPrincipal.frecuenciaPago || 'Semanal',
-                    pagoPactado: objPrincipal.pagoPactado || objBase?.pagoPactado || 0,
-                    saldoTotal: objPrincipal.saldoTotal || objBase?.saldoTotal || 0,
-                    saldoPendiente: objPrincipal.saldoPendiente !== undefined ? objPrincipal.saldoPendiente : (objBase?.saldoPendiente || 0)
-                };
-                creditos.push(consolidado);
-            }
+            const procesado = procesarCreditosMiembro(list);
+            if (procesado) creditos.push(procesado);
         });
 
         // Fallback en caso de créditos sin miembro en el listado inicial
@@ -384,21 +467,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 return idActual === mId;
             });
             if (!yaAgregado && list.length > 0) {
-                if (list.length === 1) {
-                    creditos.push(list[0].toObject ? list[0].toObject() : { ...list[0] });
-                } else {
-                    const creditoR = list.find(c => c.tipoCredito === 'R' || c.esRefill);
-                    const creditoBase = list.find(c => c.tipoCredito === 'CC' || c.tipoCredito === '8S') || list.find(c => c.tipoCredito !== 'R') || list[0];
-                    const objPrincipal = (creditoR || creditoBase).toObject ? (creditoR || creditoBase).toObject() : { ...(creditoR || creditoBase) };
-                    const todosLosPagos = [];
-                    list.forEach(c => {
-                        const obj = c.toObject ? c.toObject() : { ...c };
-                        if (Array.isArray(obj.pagos)) todosLosPagos.push(...obj.pagos);
-                    });
-                    todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
-                    objPrincipal.pagos = todosLosPagos;
-                    creditos.push(objPrincipal);
-                }
+                const procesado = procesarCreditosMiembro(list);
+                if (procesado) creditos.push(procesado);
             }
         });
 
@@ -541,7 +611,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const unCredito = creditosVisibles[0] || creditos[0];
         const grupo = unCredito?.miembro?.grupo;
         const grupoNombre = grupo?.nombre || "INDIVIDUAL";
-        const diaVisita = grupo?.diaVisita || "________________";
+        const diaVisita = grupo?.diaVisita || grupo?.diaPago || "________________";
         const horaVisita = grupo?.horaVisita || "________________";
         const claveGrupo = grupo?.clave || "________________";
 
@@ -1376,50 +1446,122 @@ exports.generarHojaControlIndividual = async (req, res) => {
             return res.status(404).json({ message: "No se encontró el crédito para este cliente" });
         }
 
+        const semanaInicioQueryInd = req.query.semanaInicio;
+        const semanaFinQueryInd = req.query.semanaFin ? parseInt(req.query.semanaFin) : null;
+        const esHojaCompletaInd = !semanaInicioQueryInd || semanaInicioQueryInd === 'completa';
+        const inicioNumInd = parseInt(semanaInicioQueryInd) || 1;
+        const esPeriodo1Ind = !esHojaCompletaInd && inicioNumInd >= 1 && (semanaFinQueryInd ? semanaFinQueryInd <= 8 : inicioNumInd <= 8);
+        const esPeriodo2Ind = !esHojaCompletaInd && inicioNumInd >= 9;
+
         let credito;
         if (creditosDelCiclo.length > 1) {
-            const creditoR = creditosDelCiclo.find(c => c.tipoCredito === 'R' || c.esRefill);
-            const creditoBase = creditosDelCiclo.find(c => c._id?.toString() !== creditoR?._id?.toString()) || creditosDelCiclo[0];
+            creditosDelCiclo.sort((a, b) => {
+                const timeA = new Date(a.createdAt || a.fechaPrimerPago || 0).getTime();
+                const timeB = new Date(b.createdAt || b.fechaPrimerPago || 0).getTime();
+                return timeA - timeB;
+            });
+            const primerCredito = creditosDelCiclo[0].toObject ? creditosDelCiclo[0].toObject() : { ...creditosDelCiclo[0] };
+            const ultimoCredito = creditosDelCiclo[creditosDelCiclo.length - 1].toObject 
+                ? creditosDelCiclo[creditosDelCiclo.length - 1].toObject() 
+                : { ...creditosDelCiclo[creditosDelCiclo.length - 1] };
+            const creditoActivo = (creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[creditosDelCiclo.length - 1]).toObject
+                ? (creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[creditosDelCiclo.length - 1]).toObject()
+                : { ...(creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[creditosDelCiclo.length - 1]) };
 
-            const creditoPrincipal = creditoR || creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[0];
-            credito = creditoPrincipal.toObject ? creditoPrincipal.toObject() : { ...creditoPrincipal };
+            if (esPeriodo1Ind) {
+                credito = primerCredito;
+            } else if (esPeriodo2Ind) {
+                credito = { ...creditoActivo };
+                if (Array.isArray(credito.pagos)) {
+                    credito.pagos = credito.pagos.map(p => {
+                        const num = Number(p.numeroPago) || 0;
+                        return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
+                    });
+                }
+            } else {
+                // Hoja Completa: tomar datos del último crédito y combinar ambos en semanas 1-16
+                const objPrincipal = { ...creditoActivo };
+                const todosLosPagos = [];
+                const pagosIdsVistos = new Set();
 
-            // Combinar todos los pagos y ahorros de todos los créditos del ciclo sin duplicar
-            const todosLosPagos = [];
-            const todosPagosAhorro = [];
-            const pagosIdsVistos = new Set();
-            const ahorroIdsVistos = new Set();
+                (primerCredito.pagos || []).forEach(p => {
+                    const num = Number(p.numeroPago) || 0;
+                    if (num <= 8) {
+                        const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                        if (!pagosIdsVistos.has(pId)) {
+                            pagosIdsVistos.add(pId);
+                            todosLosPagos.push(p);
+                        }
+                    }
+                });
 
-            creditosDelCiclo.forEach(c => {
-                const cObj = c.toObject ? c.toObject() : { ...c };
-                (cObj.pagos || []).forEach(p => {
-                    const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
+                (ultimoCredito.pagos || []).forEach(p => {
+                    const pCopy = { ...p };
+                    const num = Number(pCopy.numeroPago) || 0;
+                    if (num > 0 && num <= 8) pCopy.numeroPago = num + 8;
+                    const pId = pCopy._id ? pCopy._id.toString() : `${pCopy.numeroPago}_${pCopy.fechaPago}_${pCopy.montoPagado}`;
                     if (!pagosIdsVistos.has(pId)) {
                         pagosIdsVistos.add(pId);
-                        todosLosPagos.push(p);
+                        todosLosPagos.push(pCopy);
                     }
                 });
-                ((cObj.ahorro && cObj.ahorro.pagosAhorro) || []).forEach(a => {
-                    const aId = a._id ? a._id.toString() : `${a.numeroPago}_${a.fecha}_${a.monto}`;
-                    if (!ahorroIdsVistos.has(aId)) {
-                        ahorroIdsVistos.add(aId);
-                        todosPagosAhorro.push(a);
+
+                todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
+
+                const todosPagosAhorro = [];
+                const ahorroIdsVistos = new Set();
+                let sumaAhorroTotal = 0;
+
+                creditosDelCiclo.forEach(c => {
+                    const cObj = c.toObject ? c.toObject() : { ...c };
+                    if (cObj.ahorro) {
+                        if (Array.isArray(cObj.ahorro.pagosAhorro)) {
+                            cObj.ahorro.pagosAhorro.forEach(a => {
+                                const aCopy = { ...a };
+                                if (cObj._id?.toString() === ultimoCredito._id?.toString()) {
+                                    const numA = Number(aCopy.numeroPago) || 0;
+                                    if (numA > 0 && numA <= 8) aCopy.numeroPago = numA + 8;
+                                }
+                                const aId = aCopy._id ? aCopy._id.toString() : `${aCopy.numeroPago}_${aCopy.fecha}_${aCopy.monto}`;
+                                if (!ahorroIdsVistos.has(aId)) {
+                                    ahorroIdsVistos.add(aId);
+                                    todosPagosAhorro.push(aCopy);
+                                }
+                            });
+                        }
+                        sumaAhorroTotal += (Number(cObj.ahorro.montoTotal) || 0);
                     }
                 });
-            });
+                todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
 
-            todosLosPagos.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
-            todosPagosAhorro.sort((a, b) => (Number(a.numeroPago) || 0) - (Number(b.numeroPago) || 0));
-
-            credito.pagos = todosLosPagos;
-            if (!credito.ahorro) credito.ahorro = {};
-            credito.ahorro.pagosAhorro = todosPagosAhorro;
-
-            if (creditoBase && creditoBase.fechaPrimerPago) {
-                credito.fechaPrimerPago = creditoBase.fechaPrimerPago;
+                credito = {
+                    ...objPrincipal,
+                    _id: objPrincipal._id,
+                    tipoCredito: objPrincipal.tipoCredito || ultimoCredito.tipoCredito || primerCredito.tipoCredito,
+                    semanas: 16,
+                    pagos: todosLosPagos,
+                    ahorro: {
+                        montoTotal: Math.max(sumaAhorroTotal, objPrincipal.ahorro?.montoTotal || 0),
+                        pagosAhorro: todosPagosAhorro
+                    },
+                    garantia: (objPrincipal.garantia > 0) ? objPrincipal.garantia : (primerCredito?.garantia || 0),
+                    fechaPrimerPago: primerCredito?.fechaPrimerPago || objPrincipal.fechaPrimerPago,
+                    pagoPactado: objPrincipal.pagoPactado !== undefined ? objPrincipal.pagoPactado : (ultimoCredito.pagoPactado || 0),
+                    saldoTotal: objPrincipal.saldoTotal !== undefined ? objPrincipal.saldoTotal : (ultimoCredito.saldoTotal || 0),
+                    saldoPendiente: objPrincipal.saldoPendiente !== undefined ? objPrincipal.saldoPendiente : (ultimoCredito.saldoPendiente || 0)
+                };
             }
         } else {
-            credito = creditosDelCiclo[0];
+            const unico = creditosDelCiclo[0].toObject ? creditosDelCiclo[0].toObject() : { ...creditosDelCiclo[0] };
+            if (esPeriodo2Ind && (unico.tipoCredito === 'R' || unico.tipoCredito === '8S' || Number(unico.semanas) <= 8)) {
+                if (Array.isArray(unico.pagos)) {
+                    unico.pagos = unico.pagos.map(p => {
+                        const num = Number(p.numeroPago) || 0;
+                        return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
+                    });
+                }
+            }
+            credito = unico;
         }
 
         const esSoloRefill = creditosDelCiclo.length === 1 && (credito.tipoCredito === 'R' || credito.esRefill);
@@ -1668,8 +1810,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
         let diaPago = "";
         
         // 1. Verificamos si el cliente tiene un día de pago registrado en BD
-        if (credito.cliente && credito.cliente.diaPago) {
-            const diaReg = credito.cliente.diaPago.toUpperCase().trim();
+        if (credito.cliente && (credito.cliente.diaPago || credito.cliente.diaVisita)) {
+            const diaReg = (credito.cliente.diaPago || credito.cliente.diaVisita).toUpperCase().trim();
             
             // Si capturaron SOLO el número (ej: "18"), le agregamos " DE CADA MES"
             if (/^\d+$/.test(diaReg)) {

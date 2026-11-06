@@ -16,6 +16,10 @@ const grupoSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    diaPago: {
+        type: String,
+        required: false
+    },
     horaVisita: {
         type: String,
         required: true

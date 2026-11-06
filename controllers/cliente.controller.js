@@ -6,6 +6,7 @@ const Grupo = require('../models/Grupo');
 const Coordinacion = require('../models/Coordinacion');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
 const { normalizarRol, extraerIdStr, obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { obtenerDiaSemana } = require('../helpers/fechas');
 
 /**
  * Resuelve la coordinación para un cliente (desde asesor, grupo o usuario creador).
@@ -39,6 +40,12 @@ exports.createCliente = async (req, res) => {
         const coordResuelta = await resolverCoordinacionCliente(req.body, req.user);
         if (coordResuelta) {
             req.body.coordinacion = coordResuelta;
+        }
+
+        const diaFinal = req.body.diaPago || req.body.diaVisita || (req.body.fechaPrimerPago ? obtenerDiaSemana(req.body.fechaPrimerPago) : undefined);
+        if (diaFinal) {
+            req.body.diaPago = diaFinal;
+            req.body.diaVisita = diaFinal;
         }
 
         const cliente = new Cliente(req.body);
@@ -95,6 +102,7 @@ exports.getCliente = async (req, res) => {
                     grupo: 1,
                     horaVisita: 1,
                     diaPago: 1,
+                    diaVisita: 1,
                     tipoPago: 1,
                     coordinacion: 1,
                     asesor: 1,
@@ -219,6 +227,12 @@ exports.updateCliente = async (req, res) => {
         const coordResuelta = await resolverCoordinacionCliente(req.body, req.user);
         if (coordResuelta) {
             req.body.coordinacion = coordResuelta;
+        }
+
+        const diaFinal = req.body.diaPago || req.body.diaVisita || (req.body.fechaPrimerPago ? obtenerDiaSemana(req.body.fechaPrimerPago) : undefined);
+        if (diaFinal) {
+            req.body.diaPago = diaFinal;
+            req.body.diaVisita = diaFinal;
         }
 
         const cliente = await Cliente.findByIdAndUpdate(req.params.id, req.body, { new: true });
