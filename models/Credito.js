@@ -18,7 +18,7 @@ const creditoSchema = new mongoose.Schema({
     },
     tipoCredito: {
         type: String,
-        enum: ['CC', 'R', '8S', 'Individual', 'MAGICO'],
+        enum: ['CC', 'R', '16S', '8S', 'Individual', 'MAGICO'],
         required: true
     },
     semanas: { type: Number, required: true }, // 8 o 16
