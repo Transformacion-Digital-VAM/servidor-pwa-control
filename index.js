@@ -17,6 +17,7 @@ const grupoRoutes = require('./routes/grupo.router');
 const miembroRoutes = require('./routes/miembro.routes');
 const clienteRoutes = require('./routes/cliente.router');
 const creditoRoutes = require('./routes/credito.router');
+const magicoRoutes = require('./routes/magico.router');
 const notificacionesRoutes = require('./routes/notificaciones.router');
 const logRoutes = require('./routes/log.router');
 // Conectar a la base de datos
@@ -48,6 +49,7 @@ app.use('/api/grupos', grupoRoutes);
 app.use('/api/miembros', miembroRoutes);
 app.use('/api/clientes', clienteRoutes);
 app.use('/api/creditos', creditoRoutes);
+app.use('/api/magicos', magicoRoutes);
 app.use('/api/notificaciones', notificacionesRoutes);
 app.use('/api/notifications', notificacionesRoutes); 
 app.use('/api/logs', logRoutes);
