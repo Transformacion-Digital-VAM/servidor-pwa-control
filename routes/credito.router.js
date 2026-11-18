@@ -1,32 +1,29 @@
 const express = require('express');
 const router = express.Router();
 const creditoController = require('../controllers/credito.controller');
+const pagoCreditoController = require('../controllers/pagoCredito.controller');
+const ahorroGarantiaController = require('../controllers/ahorroGarantia.controller');
 const hcontrolController = require('../controllers/hcontrol.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
+// CRUD Créditos
 router.post('/', creditoController.crearCredito); //verifyToken
 router.get('/', creditoController.obtenerCreditos); //verifyToken
-router.get('/pagos-con-ubicacion', creditoController.getPagosConUbicacion); //verifyToken — ANTES de /:id
+router.get('/pagos-con-ubicacion', pagoCreditoController.getPagosConUbicacion); //verifyToken — ANTES de /:id
 router.get('/:id', creditoController.obtenerCreditoPorId); //verifyToken
 router.put('/:id', creditoController.actualizarCredito); //verifyToken
 router.put('/:id/cancelar-justificado', creditoController.cancelarCreditoJustificado); //verifyToken
 router.delete('/:id', creditoController.eliminarCredito); //verifyToken
 
-// PAGOS
-router.post('/:id/pagos', creditoController.registrarPago); //verifyToken
-// router.post('/:id/refill', creditoController.convertirARefill); //verifyToken
-router.post('/:id/garantia', creditoController.registrarAbonoGarantia); //verifyToken
+// Pagos
+router.post('/:id/pagos', pagoCreditoController.registrarPago); //verifyToken
 
+// Garantías y Ahorro
+router.post('/:id/garantia', ahorroGarantiaController.registrarAbonoGarantia); //verifyToken
+router.post('/:id/ahorro', ahorroGarantiaController.registrarAhorro); //verifyToken
 
-//GARANTIAS
-//router.post('/:id/garantia', creditoController.registrarGarantia); //verifyToken
-
-
-//AHORRO
-router.post('/:id/ahorro', creditoController.registrarAhorro); //verifyToken
-
-
-//Hoja de control
+// Hoja de control
 router.get('/hoja-control/:grupoId/:ciclo', hcontrolController.generarHojaControlGrupal); //verifyToken
 router.get('/hoja-control-individual/:clienteId/:ciclo', hcontrolController.generarHojaControlIndividual); //verifyToken
+
 module.exports = router;
