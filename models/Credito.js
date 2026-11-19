@@ -53,6 +53,7 @@ const creditoSchema = new mongoose.Schema({
     },
     fechaPrimerPago: { type: Date, required: true },
     pagos: [{
+        clientId: { type: String, required: false },
         numeroPago: { type: Number, required: true },
         // 1. PAGO DEL CRÉDITO (Liquidación / Abono)
         montoPagado: { type: Number, required: false },
@@ -137,6 +138,7 @@ const creditoSchema = new mongoose.Schema({
     ahorro: {
         montoTotal: { type: Number, required: false },
         pagosAhorro: [{
+            clientId: { type: String, required: false },
             monto: { type: Number },
             fecha: { type: Date, default: Date.now },
             ubicacion: {
@@ -170,5 +172,6 @@ creditoSchema.index({ tipoCredito: 1 });
 creditoSchema.index({ cliente: 1, tipoCredito: 1 });
 creditoSchema.index({ miembro: 1 });
 creditoSchema.index({ estado: 1 });
+creditoSchema.index({ 'pagos.clientId': 1 });
 
 module.exports = mongoose.model('Credito', creditoSchema);

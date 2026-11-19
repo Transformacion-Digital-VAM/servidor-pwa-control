@@ -752,7 +752,7 @@ exports.registrarPago = async (req, res) => {
             efectivoCredito, transferenciaCredito, tarjetaCredito, depositoCredito,
             montoSolidario, efectivoSolidario, transferenciaSolidario, tarjetaSolidario, depositoSolidario,
             montoAhorro, efectivoAhorro, transferenciaAhorro, tarjetaAhorro, depositoAhorro,
-            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago
+            recuperacionSolidario, numeroRecibo, ubicacion, numeroPago, clientId, isOfflineSync
         } = req.body;
 
         const beneficiariosSolidarios = Array.isArray(req.body.beneficiariosSolidarios)
@@ -771,6 +771,20 @@ exports.registrarPago = async (req, res) => {
         if (!creditoOrigen) {
             logWarn(req, 'REGISTRAR_PAGO_ORIGEN_NOT_FOUND', 'Crédito de origen no encontrado para registrar pago', { id, body: req.body });
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
+        }
+
+        // Idempotencia: Si ya existe un pago con este clientId, retornar 200 OK inmediatamente
+        if (clientId) {
+            const yaRegistradoOrigen = (creditoOrigen.pagos || []).some(p => p.clientId === clientId);
+            if (yaRegistradoOrigen) {
+                logWarn(req, 'REGISTRAR_PAGO_IDEMPOTENTE_ORIGEN', `Pago con clientId ${clientId} ya se encontraba registrado. Respondiendo 200 OK.`, { clientId, creditoId: id });
+                return res.status(200).json({
+                    ok: true,
+                    msg: 'Pago ya registrado previamente (idempotente)',
+                    duplicado: true,
+                    credito: creditoOrigen
+                });
+            }
         }
 
         let montoCreditoNum = Number(montoPagado) || 0;
@@ -805,6 +819,7 @@ exports.registrarPago = async (req, res) => {
 
             const VENTANA_DOBLE_CLIC_MS = 30 * 1000;
             const esDobleClic = (creditoOrigen.pagos || []).some(p => {
+                if (clientId && p.clientId === clientId) return true;
                 const fechaExistente = new Date(p.fechaPago);
                 const diferenciaMs = Math.abs(fechaPagoObj - fechaExistente);
                 const coincideSemana = numeroPagoNum && p.numeroPago ? p.numeroPago === numeroPagoNum : true;
@@ -818,6 +833,17 @@ exports.registrarPago = async (req, res) => {
                 );
             });
             if (esDobleClic) {
+                if (clientId || isOfflineSync) {
+                    logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_DUPLICADO_IDEMPOTENTE', 'Pago individual duplicado detectado en reintento/sync. Respondiendo 200 OK', {
+                        creditoId: id, clientId
+                    });
+                    return res.status(200).json({
+                        ok: true,
+                        msg: 'Pago individual ya registrado previamente (sincronizado)',
+                        duplicado: true,
+                        credito: creditoOrigen
+                    });
+                }
                 logWarn(req, 'REGISTRAR_PAGO_INDIVIDUAL_DOBLE_CLIC', 'Posible doble clic detectado (mismo pago en < 30s)', {
                     creditoId: id, montoCredito: montoCreditoNum, metodoPago
                 });
@@ -866,6 +892,7 @@ exports.registrarPago = async (req, res) => {
             const totalPagadoNuevo = totalHistInd + montoCreditoNum + (montoSolidarioNum || 0);
 
             const nuevoPago = {
+                clientId: clientId || null,
                 numeroPago: numSemana,
                 montoPagado: montoCreditoNum,
                 efectivoCredito: efRestante,
@@ -949,6 +976,12 @@ exports.registrarPago = async (req, res) => {
 
                 const creditoDestino = await Credito.findOne({ miembro: bId, estado: 'Activo' }).sort({ tipoCredito: -1, createdAt: -1 });
                 if (creditoDestino) {
+                    const clientDestId = clientId ? `${clientId}_dest_${bId}` : null;
+                    if (clientDestId && (creditoDestino.pagos || []).some(p => p.clientId === clientDestId)) {
+                        totalSolidarioOtorgado += bMonto;
+                        detallesBeneficiariosAplicados.push({ miembroId: bId, creditoDestinoId: creditoDestino._id, monto: bMonto });
+                        continue;
+                    }
                     const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
                     const existeDuplicado = (creditoDestino.pagos || []).some(p => {
                         const fechaPagoExistente = new Date(p.fechaPago);
@@ -966,6 +999,7 @@ exports.registrarPago = async (req, res) => {
                     }
                     const numeroPagoB = (creditoDestino.pagos || []).length + 1;
                     const nuevoPagoDestino = {
+                        clientId: clientDestId,
                         numeroPago: numeroPagoB,
                         montoPagado: 0,
                         efectivoCredito: 0,
@@ -1017,6 +1051,7 @@ exports.registrarPago = async (req, res) => {
 
             const numeroPagoOrigen = (creditoOrigen.pagos || []).length + 1;
             const pagoMaster = {
+                clientId: clientId || null,
                 numeroPago: numeroPagoOrigen,
                 montoPagado: 0,
                 efectivoCredito: efectivoCredito || 0,
@@ -1112,6 +1147,7 @@ exports.registrarPago = async (req, res) => {
 
         const fechaPagoObj = fechaPago ? new Date(fechaPago) : new Date();
         const existeDuplicado = (creditoDestino.pagos || []).some(p => {
+            if (clientId && p.clientId === clientId) return true;
             const fechaPagoExistente = new Date(p.fechaPago);
             const mismoOrigenSolidario = pagoSolidario && !recuperacionSolidario && p.quienPrestoSolidario && creditoOrigen.miembro
                 ? p.quienPrestoSolidario.toString() === creditoOrigen.miembro.toString()
@@ -1128,6 +1164,18 @@ exports.registrarPago = async (req, res) => {
             );
         });
         if (existeDuplicado) {
+            if (clientId || isOfflineSync) {
+                logWarn(req, 'REGISTRAR_PAGO_DUPLICADO_IDEMPOTENTE', 'Pago duplicado detectado para sync idempotente. Respondiendo 200 OK', {
+                    creditoDestinoId: creditoDestino._id,
+                    clientId
+                });
+                return res.status(200).json({
+                    ok: true,
+                    msg: 'Pago ya registrado previamente (sincronizado)',
+                    duplicado: true,
+                    credito: creditoDestino
+                });
+            }
             logWarn(req, 'REGISTRAR_PAGO_DUPLICADO', 'Ya existe un pago igual registrado para este crédito en el mismo día', {
                 creditoDestinoId: creditoDestino._id,
                 montoPagado: montoCreditoNum,
@@ -1141,6 +1189,7 @@ exports.registrarPago = async (req, res) => {
         const saldoAnteriorDestino = creditoDestino.saldoPendiente;
 
         const nuevosPagos = distribuirCuotasPago({
+            clientId,
             montoCreditoNum,
             pagoPactado: creditoDestino.pagoPactado,
             pagosExistentes: creditoDestino.pagos || [],
@@ -1372,6 +1421,7 @@ exports.registrarAbonoGarantia = async (req, res) => {
 
 // Helper interno para distribuir cuotas y detectar adelantos
 function distribuirCuotasPago({
+    clientId = null,
     montoCreditoNum,
     pagoPactado,
     pagosExistentes = [],
@@ -1422,6 +1472,7 @@ function distribuirCuotasPago({
         }
 
         return [{
+            clientId: clientId || null,
             numeroPago: numEsp,
             montoPagado: montoCreditoNum,
             efectivoCredito: efRestante,
@@ -1463,6 +1514,7 @@ function distribuirCuotasPago({
             }
         }
         return [{
+            clientId: clientId || null,
             numeroPago,
             montoPagado: montoCreditoNum,
             efectivoCredito,
@@ -1544,6 +1596,7 @@ function distribuirCuotasPago({
         ahorroRestante = 0;
 
         return {
+            clientId: clientId ? `${clientId}_p_${numPago}` : null,
             numeroPago: numPago,
             montoPagado: montoCuota,
             efectivoCredito: efCuota,
@@ -1724,7 +1777,7 @@ function calcularSemanaActual(fechaPrimerPago, frecuenciaPago, fechaReferencia =
 exports.registrarAhorro = async (req, res) => {
     try {
         const { id } = req.params;
-        const { monto, fecha, efectivo, transferencia, deposito, tarjeta, ubicacion } = req.body;
+        const { monto, fecha, efectivo, transferencia, deposito, tarjeta, ubicacion, clientId, isOfflineSync } = req.body;
 
         const credito = await Credito.findById(id);
 
@@ -1734,6 +1787,20 @@ exports.registrarAhorro = async (req, res) => {
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
+        }
+
+        // Idempotencia para ahorro
+        if (clientId && credito.ahorro && Array.isArray(credito.ahorro.pagosAhorro)) {
+            const yaRegistrado = credito.ahorro.pagosAhorro.some(p => p.clientId === clientId);
+            if (yaRegistrado) {
+                logWarn(req, 'REGISTRAR_AHORRO_IDEMPOTENTE', `Ahorro con clientId ${clientId} ya se encontraba registrado.`, { clientId, creditoId: id });
+                return res.status(200).json({
+                    ok: true,
+                    msg: 'Ahorro ya registrado previamente (idempotente)',
+                    duplicado: true,
+                    credito
+                });
+            }
         }
 
         if (monto <= 0) {
@@ -1752,6 +1819,7 @@ exports.registrarAhorro = async (req, res) => {
         }
 
         credito.ahorro.pagosAhorro.push({
+            clientId: clientId || null,
             monto,
             efectivo: efectivo || 0,
             transferencia: transferencia || 0,

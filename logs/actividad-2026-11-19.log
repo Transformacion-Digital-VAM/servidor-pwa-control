@@ -1,0 +1,2 @@
+[2026-11-19 17:52:14.236] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (261ms)
+[2026-11-19 17:53:54.384] [HTTP] [Usuario: Test COP | Rol: coordinador | ID: 6ad7fea2d62d60af4d9d31f0 | IP: 127.0.0.1] POST /api/users/location -> Status: 200 (215ms)
