@@ -27,7 +27,7 @@ const getBrowser = async () => {
             ]
         };
 
-        
+
         const possibleCacheDirs = [
             path.join(process.cwd(), '.puppeteer-cache'),
             process.env.PUPPETEER_CACHE_DIR,
@@ -289,13 +289,43 @@ exports.generarHojaControlGrupal = async (req, res) => {
         }
 
         // --- CONSOLIDACIÓN DE CRÉDITOS POR MIEMBRO (CONTINUIDAD CC/8S + REFILL O MÚLTIPLES) ---
+        // Determinar semanas del grupo y características del ciclo desde creditosRaw
+        const tieneHistorialCC = creditosRaw.some(c => c.tipoCredito === 'CC');
+        const esSoloRefill = !tieneHistorialCC && creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === 'R');
+        const esSolo8S = creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === '8S');
+
+        const semanasRawValidas = creditosRaw
+            .map(c => Number(c.semanas))
+            .filter(s => !isNaN(s) && s > 0);
+
+        let totalSemanasGrupo = 16;
+        if (semanasRawValidas.length > 0) {
+            totalSemanasGrupo = Math.max(...semanasRawValidas);
+        } else {
+            totalSemanasGrupo = esSolo8S ? 8 : 16;
+        }
+
+        const mitadSemanas = Math.floor(totalSemanasGrupo / 2);
+        const semanaInicioP2 = mitadSemanas + 1;
+
+        // Fecha de inicio de Periodo 2 estimada por fechaPrimerPago base del grupo
+        const fechasValidasGrupo = creditosRaw
+            .map(c => new Date(c.fechaPrimerPago || c.createdAt).getTime())
+            .filter(t => !isNaN(t) && t > 0);
+        const minFechaInicioGrupo = fechasValidasGrupo.length > 0 ? Math.min(...fechasValidasGrupo) : 0;
+        const fechaInicioP2Time = minFechaInicioGrupo > 0
+            ? (minFechaInicioGrupo + (mitadSemanas * 7 * 24 * 60 * 60 * 1000))
+            : 0;
+
         // Determinar periodo o tipo de hoja solicitada
         const semanaInicioQuery = req.query.semanaInicio;
         const semanaFinQuery = req.query.semanaFin ? parseInt(req.query.semanaFin) : null;
         const esHojaCompleta = !semanaInicioQuery || semanaInicioQuery === 'completa';
         const inicioNum = parseInt(semanaInicioQuery) || 1;
-        const esPeriodo1 = !esHojaCompleta && inicioNum >= 1 && (semanaFinQuery ? semanaFinQuery <= 8 : inicioNum <= 8);
-        const esPeriodo2 = !esHojaCompleta && inicioNum >= 9;
+        const finNum = semanaFinQuery || (esHojaCompleta ? totalSemanasGrupo : Math.min(inicioNum + mitadSemanas - 1, totalSemanasGrupo));
+
+        const esPeriodo1 = !esHojaCompleta && inicioNum <= mitadSemanas && finNum <= mitadSemanas;
+        const esPeriodo2 = !esHojaCompleta && inicioNum >= semanaInicioP2;
 
         const creditosPorMiembro = new Map();
         creditosRaw.forEach(c => {
@@ -310,19 +340,6 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const procesarCreditosMiembro = (list) => {
             if (!list || list.length === 0) return null;
 
-            if (list.length === 1) {
-                const cObj = list[0].toObject ? list[0].toObject() : { ...list[0] };
-                if (esPeriodo2 && (cObj.tipoCredito === 'R' || cObj.tipoCredito === '8S' || Number(cObj.semanas) <= 8)) {
-                    if (Array.isArray(cObj.pagos)) {
-                        cObj.pagos = cObj.pagos.map(p => {
-                            const num = Number(p.numeroPago) || 0;
-                            return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
-                        });
-                    }
-                }
-                return cObj;
-            }
-
             // Orden cronológico: list[0] = primer crédito, list[list.length - 1] = último crédito
             list.sort((a, b) => {
                 const timeA = new Date(a.createdAt || a.fechaPrimerPago || 0).getTime();
@@ -330,41 +347,112 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 return timeA - timeB;
             });
 
-            const primerCredito = list[0].toObject ? list[0].toObject() : { ...list[0] };
-            const ultimoCredito = list[list.length - 1].toObject ? list[list.length - 1].toObject() : { ...list[list.length - 1] };
-            const creditoActivo = (list.find(c => c.estado === 'Activo') || list[list.length - 1]).toObject
-                ? (list.find(c => c.estado === 'Activo') || list[list.length - 1]).toObject()
-                : { ...(list.find(c => c.estado === 'Activo') || list[list.length - 1]) };
+            // Analizar cada crédito del miembro
+            const creditosInfo = list.map(c => {
+                const cObj = c.toObject ? c.toObject() : { ...c };
+                const saldoPend = Number(cObj.saldoPendiente) || 0;
+                const tieneSaldo = saldoPend > 0;
+                const esActivo = cObj.estado === 'Activo' || tieneSaldo;
+                const pagos = Array.isArray(cObj.pagos) ? cObj.pagos : [];
+                
+                const numsPago = pagos.map(p => Number(p.numeroPago)).filter(n => !isNaN(n) && n > 0);
+                const maxPagoNum = numsPago.length > 0 ? Math.max(...numsPago) : 0;
+                
+                // Un crédito tiene pagos en Periodo 2 si tiene número de pago >= semanaInicioP2
+                // o si la fecha de pago es >= fechaInicioP2Time
+                const tienePagoEnP2PorFecha = fechaInicioP2Time > 0 && pagos.some(p => {
+                    if (!p.fechaPago) return false;
+                    const fp = new Date(p.fechaPago).getTime();
+                    return !isNaN(fp) && fp >= (fechaInicioP2Time - 2 * 24 * 60 * 60 * 1000);
+                });
+                const tienePagoEnP2PorNumero = numsPago.some(n => n >= semanaInicioP2);
+                const tienePagosEnP2 = tienePagoEnP2PorNumero || tienePagoEnP2PorFecha;
 
-            // 1. Periodo 1 (semanas 1 a 8): Tomar el primer crédito del ciclo
-            if (esPeriodo1) {
-                return primerCredito;
-            }
+                const semanasCred = Number(cObj.semanas) || (cObj.tipoCredito === '8S' ? 8 : totalSemanasGrupo);
 
-            // 2. Periodo 2 (semanas 9 a 16): Tomar el crédito activo o último del ciclo
+                return {
+                    raw: c,
+                    obj: cObj,
+                    saldoPend,
+                    tieneSaldo,
+                    esActivo,
+                    pagos,
+                    maxPagoNum,
+                    tienePagosEnP2,
+                    semanasCred
+                };
+            });
+
+            // 1. PERIODO 2 (semanas semanaInicioP2 a fin, ej: 9 a 16):
             if (esPeriodo2) {
-                const objP2 = { ...creditoActivo };
-                if (Array.isArray(objP2.pagos)) {
+                // REGLA: Los miembros con saldo pendiente / crédito nuevo para este periodo SÍ deben mostrarse.
+                // Los miembros de 8S (o créditos liquidados) sin saldo pendiente y sin pagos para estas fechas NO deben mostrarse.
+                const credConSaldo = creditosInfo.find(ci => ci.tieneSaldo) || creditosInfo.find(ci => ci.esActivo);
+                const credConPagosP2 = creditosInfo.find(ci => ci.tienePagosEnP2);
+
+                if (!credConSaldo && !credConPagosP2) {
+                    // El miembro tiene saldo $0 en todos sus créditos y NO tiene pagos en Periodo 2.
+                    // Ya liquidó en Periodo 1 y no renovó. En la hoja completa tiene guión '-' y fondo azul.
+                    return null;
+                }
+
+                // Crédito a mostrar en Periodo 2:
+                const elegidoInfo = credConSaldo || credConPagosP2 || creditosInfo[creditosInfo.length - 1];
+                const objP2 = { ...elegidoInfo.obj };
+
+                // Remapear pagos 1..mitadSemanas a periodo 2 sólo si realmente corresponden a Periodo 2
+                if (Array.isArray(objP2.pagos) && objP2.pagos.length > 0) {
                     objP2.pagos = objP2.pagos.map(p => {
                         const num = Number(p.numeroPago) || 0;
-                        return (num > 0 && num <= 8) ? { ...p, numeroPago: num + 8 } : p;
+                        if (num > 0 && num <= mitadSemanas) {
+                            if (p.fechaPago && fechaInicioP2Time > 0) {
+                                const fp = new Date(p.fechaPago).getTime();
+                                if (!isNaN(fp) && fp < (fechaInicioP2Time - 2 * 24 * 60 * 60 * 1000)) {
+                                    return p;
+                                }
+                            }
+                            return { ...p, numeroPago: num + mitadSemanas };
+                        }
+                        return p;
                     });
                 }
+
                 return objP2;
             }
 
-            // 3. Hoja Completa: Se visualizan ambos créditos en las 16 semanas.
-            // Los datos del miembro (pagoPactado, saldoTotal, saldoPendiente, tipoCredito)
-            // deben ser los del ÚLTIMO CRÉDITO.
-            const objPrincipal = { ...creditoActivo };
+            // 2. PERIODO 1 (semanas 1 a mitadSemanas, ej: 1 a 8):
+            if (esPeriodo1) {
+                const primerInfo = creditosInfo[0];
+                // Si el miembro sólo tiene créditos iniciados en Periodo 2 (ingresó a mitad de ciclo)
+                const fp = primerInfo.obj.fechaPrimerPago ? new Date(primerInfo.obj.fechaPrimerPago).getTime() : 0;
+                const inicioEnP2 = fechaInicioP2Time > 0 && fp >= (fechaInicioP2Time - 2 * 24 * 60 * 60 * 1000);
+                const tienePagosP1 = primerInfo.pagos.some(p => Number(p.numeroPago) > 0 && Number(p.numeroPago) <= mitadSemanas);
+                if (inicioEnP2 && !tienePagosP1) {
+                    return null;
+                }
+                return primerInfo.obj;
+            }
+
+            // 3. HOJA COMPLETA:
+            if (list.length === 1) {
+                return list[0].toObject ? list[0].toObject() : { ...list[0] };
+            }
+
+            // Consolidación de múltiples créditos para Hoja Completa:
+            const primerCredito = list[0].toObject ? list[0].toObject() : { ...list[0] };
+            const ultimoCredito = (list.find(c => Number(c.saldoPendiente) > 0) || list[list.length - 1]).toObject
+                ? (list.find(c => Number(c.saldoPendiente) > 0) || list[list.length - 1]).toObject()
+                : { ...(list.find(c => Number(c.saldoPendiente) > 0) || list[list.length - 1]) };
+
+            const objPrincipal = { ...ultimoCredito };
 
             const todosLosPagos = [];
             const pagosIdsVistos = new Set();
 
-            // Pagos del primer crédito (semanas 1-8)
+            // Pagos del primer crédito (semanas 1 a mitadSemanas)
             (primerCredito.pagos || []).forEach(p => {
                 const num = Number(p.numeroPago) || 0;
-                if (num <= 8) {
+                if (num <= mitadSemanas) {
                     const pId = p._id ? p._id.toString() : `${p.numeroPago}_${p.fechaPago}_${p.montoPagado}`;
                     if (!pagosIdsVistos.has(pId)) {
                         pagosIdsVistos.add(pId);
@@ -373,12 +461,14 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 }
             });
 
-            // Pagos del último crédito (semanas 9-16, mapeando pagos 1..8 a 9..16 si aplica)
+            // Pagos del último crédito (semanas siguientes)
             (ultimoCredito.pagos || []).forEach(p => {
                 const pCopy = { ...p };
                 const num = Number(pCopy.numeroPago) || 0;
-                if (num > 0 && num <= 8) {
-                    pCopy.numeroPago = num + 8;
+                if (num > 0 && num <= mitadSemanas) {
+                    if (!p.fechaPago || fechaInicioP2Time === 0 || new Date(p.fechaPago).getTime() >= (fechaInicioP2Time - 2 * 24 * 60 * 60 * 1000)) {
+                        pCopy.numeroPago = num + mitadSemanas;
+                    }
                 }
                 const pId = pCopy._id ? pCopy._id.toString() : `${pCopy.numeroPago}_${pCopy.fechaPago}_${pCopy.montoPagado}`;
                 if (!pagosIdsVistos.has(pId)) {
@@ -416,8 +506,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
                             const aCopy = { ...a };
                             if (cObj._id?.toString() === ultimoCredito._id?.toString()) {
                                 const numA = Number(aCopy.numeroPago) || 0;
-                                if (numA > 0 && numA <= 8) {
-                                    aCopy.numeroPago = numA + 8;
+                                if (numA > 0 && numA <= mitadSemanas) {
+                                    aCopy.numeroPago = numA + mitadSemanas;
                                 }
                             }
                             const aId = aCopy._id ? aCopy._id.toString() : `${aCopy.numeroPago}_${aCopy.fecha}_${aCopy.monto}`;
@@ -436,7 +526,7 @@ exports.generarHojaControlGrupal = async (req, res) => {
                 ...objPrincipal,
                 _id: objPrincipal._id,
                 tipoCredito: objPrincipal.tipoCredito || (ultimoCredito.tipoCredito === 'R' ? 'R' : primerCredito.tipoCredito),
-                semanas: 16,
+                semanas: totalSemanasGrupo,
                 pagos: todosLosPagos,
                 ahorro: {
                     montoTotal: Math.max(sumaAhorroTotal, objPrincipal.ahorro?.montoTotal || 0),
@@ -521,17 +611,9 @@ exports.generarHojaControlGrupal = async (req, res) => {
             .map(c => Number(c.semanas))
             .filter(s => !isNaN(s) && s > 0);
 
-        let totalSemanasGrupo = 16;
         if (semanasValidas.length > 0) {
-            totalSemanasGrupo = Math.max(...semanasValidas);
-        } else {
-            const todos8S = creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === '8S');
-            totalSemanasGrupo = todos8S ? 8 : 16;
+            totalSemanasGrupo = Math.max(totalSemanasGrupo, ...semanasValidas);
         }
-
-        const tieneHistorialCC = creditosRaw.some(c => c.tipoCredito === 'CC');
-        const esSoloRefill = !tieneHistorialCC && creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === 'R');
-        const esSolo8S = creditosRaw.length > 0 && creditosRaw.every(c => c.tipoCredito === '8S');
 
         let maxSemanas = totalSemanasGrupo;
         let semanaInicioReal = 1;
@@ -615,8 +697,8 @@ exports.generarHojaControlGrupal = async (req, res) => {
         const horaVisita = grupo?.horaVisita || "________________";
         const claveGrupo = grupo?.clave || "________________";
 
-        let estadoGrupoValor = req.query.estadoGrupo 
-            || creditosRaw.find(c => c.estadoGrupo)?.estadoGrupo 
+        let estadoGrupoValor = req.query.estadoGrupo
+            || creditosRaw.find(c => c.estadoGrupo)?.estadoGrupo
             || creditosVisibles.find(c => c.estadoGrupo)?.estadoGrupo
             || creditos.find(c => c.estadoGrupo)?.estadoGrupo;
 
@@ -1461,8 +1543,8 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 return timeA - timeB;
             });
             const primerCredito = creditosDelCiclo[0].toObject ? creditosDelCiclo[0].toObject() : { ...creditosDelCiclo[0] };
-            const ultimoCredito = creditosDelCiclo[creditosDelCiclo.length - 1].toObject 
-                ? creditosDelCiclo[creditosDelCiclo.length - 1].toObject() 
+            const ultimoCredito = creditosDelCiclo[creditosDelCiclo.length - 1].toObject
+                ? creditosDelCiclo[creditosDelCiclo.length - 1].toObject()
                 : { ...creditosDelCiclo[creditosDelCiclo.length - 1] };
             const creditoActivo = (creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[creditosDelCiclo.length - 1]).toObject
                 ? (creditosDelCiclo.find(c => c.estado === 'Activo') || creditosDelCiclo[creditosDelCiclo.length - 1]).toObject()
@@ -1589,7 +1671,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             // Calcular inicio de renderizado y total de semanas a mostrar
             let semanaInicioReal = 1;
             let semanasRender = semanasTotales;
-            
+
             if (req.query.semanaInicio && req.query.semanaInicio !== 'completa') {
                 semanaInicioReal = parseInt(req.query.semanaInicio);
                 if (req.query.semanaFin) {
@@ -1728,7 +1810,7 @@ exports.generarHojaControlIndividual = async (req, res) => {
             const sf = row.llena ? (row.found ? formatoMoneda(row.saldoFinal) : '') : '';
 
             const siCell = si ? `<div class="align-money"><span>$</span> <span>${si}</span></div>` : '';
-            
+
             let pContent = p;
             if (row.llena && row.found && row.fechaPagoReal) {
                 const metodoInfo = row.metodoPago ? ` - ${row.metodoPago}` : '';
@@ -1806,13 +1888,13 @@ exports.generarHojaControlIndividual = async (req, res) => {
         const diasSemana = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
         const baseDate = new Date(fechaBasica);
         baseDate.setMinutes(baseDate.getMinutes() + baseDate.getTimezoneOffset());
-        
+
         let diaPago = "";
-        
+
         // 1. Verificamos si el cliente tiene un día de pago registrado en BD
         if (credito.cliente && (credito.cliente.diaPago || credito.cliente.diaVisita)) {
             const diaReg = (credito.cliente.diaPago || credito.cliente.diaVisita).toUpperCase().trim();
-            
+
             // Si capturaron SOLO el número (ej: "18"), le agregamos " DE CADA MES"
             if (/^\d+$/.test(diaReg)) {
                 diaPago = `${diaReg} DE CADA MES`;
@@ -1820,16 +1902,16 @@ exports.generarHojaControlIndividual = async (req, res) => {
                 // Si ya dice "18 DE CADA MES" o "LUNES", lo dejamos tal cual
                 diaPago = diaReg;
             }
-        } 
+        }
         // 2. Si no hay nada registrado, pero la frecuencia es Mensual, lo sacamos de la fecha
         else if ((credito.frecuenciaPago || "").toUpperCase() === 'MENSUAL') {
             diaPago = `${baseDate.getDate()} DE CADA MES`;
-        } 
+        }
         // 3. Fallback: Si es semanal/quincenal y no hay registro, ponemos el día de la semana (ej. SÁBADO)
         else {
             diaPago = diasSemana[baseDate.getDay()];
         }
-        
+
         const asesorStr = credito.cliente && credito.cliente.asesor
             ? (credito.cliente.asesor.nombre || credito.cliente.asesor.username || "________________")
             : "________________";

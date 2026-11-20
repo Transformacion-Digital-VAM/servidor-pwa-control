@@ -78,6 +78,32 @@ exports.createGrupo = async (req, res) => {
             req.body.diaPago = diaFinal;
         }
 
+        // Si ya existe un grupo con esa clave, reutilizarlo y actualizarlo en vez de fallar con E11000 duplicate key
+        const claveTrim = req.body.clave ? String(req.body.clave).trim() : null;
+        if (claveTrim) {
+            const grupoExistente = await Grupo.findOne({ clave: claveTrim });
+            if (grupoExistente) {
+                const grupoActualizado = await Grupo.findByIdAndUpdate(
+                    grupoExistente._id,
+                    { $set: req.body },
+                    { new: true }
+                );
+                if (diaFinal) {
+                    await Cliente.updateMany(
+                        { $or: [{ grupo: String(grupoExistente._id) }, { grupo: grupoActualizado.nombre }] },
+                        { $set: { diaPago: diaFinal, diaVisita: diaFinal } }
+                    );
+                }
+                const datosGrupo = formatGrupoData(grupoActualizado);
+                logAccion(req, 'REUTILIZAR_GRUPO_EXISTENTE', {
+                    descripcion: `Grupo existente reutilizado por clave "${claveTrim}": "${grupoActualizado.nombre}"`,
+                    datos: req.body,
+                    resultado: datosGrupo
+                });
+                return res.status(200).json(grupoActualizado);
+            }
+        }
+
         const grupo = new Grupo(req.body);
         await grupo.save();
 
@@ -91,6 +117,22 @@ exports.createGrupo = async (req, res) => {
 
         res.status(201).json(grupo);
     } catch (error) {
+        if (error.code === 11000 && req.body.clave) {
+            try {
+                const claveTrim = String(req.body.clave).trim();
+                const grupoExistente = await Grupo.findOne({ clave: claveTrim });
+                if (grupoExistente) {
+                    const grupoActualizado = await Grupo.findByIdAndUpdate(
+                        grupoExistente._id,
+                        { $set: req.body },
+                        { new: true }
+                    );
+                    return res.status(200).json(grupoActualizado);
+                }
+            } catch (innerErr) {
+                // continuar al log de error general
+            }
+        }
         logError(req, 'CREAR_GRUPO_ERROR', error, { body: req.body });
         res.status(500).json({ message: error.message });
     }
