@@ -1,0 +1,18 @@
+[2026-11-24 15:32:34.193] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (365ms)
+[2026-11-24 15:33:17.132] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 15:51:34.123] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:01:54.906] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:09:26.061] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:12:47.452] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (240ms)
+[2026-11-24 16:13:43.065] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:13:51.129] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (242ms)
+[2026-11-24 16:15:13.046] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:33:07.319] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:39:54.945] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:43:06.372] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 16:55:35.179] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 17:13:56.834] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 17:23:18.099] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (467ms)
+[2026-11-24 17:24:40.751] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-24 17:26:39.089] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (950ms)
+[2026-11-24 17:27:56.729] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length

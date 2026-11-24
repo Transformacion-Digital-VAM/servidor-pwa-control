@@ -107,7 +107,9 @@ exports.getMiembros = async (req, res) => {
             }
         }
 
-        const miembros = await Miembro.find(query).populate('grupo').lean();
+        const miembros = await Miembro.find(query)
+            .populate('grupo', 'nombre clave')
+            .lean();
         res.status(200).json(miembros);
     } catch (error) {
         logError(req, 'GET_MIEMBROS_ERROR', error);
