@@ -52,8 +52,24 @@ app.use('/api/notificaciones', notificacionesRoutes);
 app.use('/api/notifications', notificacionesRoutes); 
 app.use('/api/logs', logRoutes);
 
+// Endpoint de salud y diagnóstico de memoria
+app.get('/api/health', (req, res) => {
+  const mem = process.memoryUsage();
+  res.status(200).json({
+    status: 'ok',
+    uptime: Math.round(process.uptime()),
+    memory: {
+      rssMB: Math.round(mem.rss / 1024 / 1024),
+      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+      externalMB: Math.round(mem.external / 1024 / 1024)
+    }
+  });
+});
+
 // Iniciar el servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server online on port ${PORT}`);
+  const mem = process.memoryUsage();
+  console.log(`Server online on port ${PORT} | RAM inicial: ${Math.round(mem.rss/1024/1024)}MB`);
 });
