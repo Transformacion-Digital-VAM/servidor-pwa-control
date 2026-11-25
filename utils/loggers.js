@@ -265,7 +265,7 @@ function logError(req, accion, error, datosAdicionales = {}) {
 function requestLoggerMiddleware(req, res, next) {
     const metodosMutantes = ['POST', 'PUT', 'DELETE', 'PATCH'];
 
-    // Solo loguear peticiones que modifican datos o peticiones relevantes
+    // Loguear peticiones mutantes en BD/archivo, y peticiones GET lentas o con error en consola para diagnóstico
     if (metodosMutantes.includes(req.method)) {
         const inicio = Date.now();
         const { method, originalUrl } = req;
@@ -300,6 +300,15 @@ function requestLoggerMiddleware(req, res, next) {
                 descripcion: `${method} ${originalUrl} -> Status: ${status} (${duracion}ms)`,
                 detalles: { method, originalUrl, status, duracionMs: duracion }
             });
+        });
+    } else if (req.method === 'GET') {
+        const inicio = Date.now();
+        const { originalUrl } = req;
+        res.on('finish', () => {
+            const duracion = Date.now() - inicio;
+            if (res.statusCode >= 400 || duracion > 1000) {
+                console.log(`[HTTP-GET] ${originalUrl} -> Status: ${res.statusCode} (${duracion}ms)`);
+            }
         });
     }
 
