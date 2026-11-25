@@ -419,7 +419,7 @@ exports.obtenerCreditos = async (req, res) => {
             }
         });
 
-        if (operacionesBulk.length > 0) {
+        if (operacionesBulk.length > 0 && operacionesBulk.length <= 200) {
             Credito.bulkWrite(operacionesBulk).catch(err => console.error('Error background bulkWrite:', err));
         }
 

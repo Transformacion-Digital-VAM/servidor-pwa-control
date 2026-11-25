@@ -109,7 +109,6 @@ exports.getMiembros = async (req, res) => {
 
         const miembros = await Miembro.find(query)
             .select('_id nombre apellidos rol grupo ciclo')
-            .populate('grupo', '_id nombre clave')
             .lean();
         res.status(200).json(miembros);
     } catch (error) {
