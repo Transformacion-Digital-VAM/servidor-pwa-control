@@ -31,3 +31,4 @@
 [2026-11-25 18:41:13.299] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (301ms)
 [2026-11-25 18:52:41.167] [ERROR] [Usuario: N/A | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_GRUPOS_ERROR] Error: Schema hasn't been registered for model "Miembro".
 Use mongoose.model(name, schema)
+[2026-11-25 19:55:06.206] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (230ms)

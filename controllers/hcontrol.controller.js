@@ -11,14 +11,21 @@ const path = require('path');
 let _browser = null;
 let _browserIdleTimer = null;
 let _renderQueue = Promise.resolve(); // serializa renders para evitar picos de RAM
+let _activeRenders = 0; // contador de renders activos para evitar cierre durante uso
 
-const BROWSER_IDLE_MS = 20000; // cerrar Chrome si no hay actividad en 20 s
+const BROWSER_IDLE_MS = 30000; // cerrar Chrome si no hay actividad en 30 s
 
 const _resetIdleTimer = () => {
     if (_browserIdleTimer) clearTimeout(_browserIdleTimer);
     _browserIdleTimer = setTimeout(async () => {
+        // No cerrar si hay renders activos
+        if (_activeRenders > 0) {
+            console.log('[Puppeteer] Idle timer: hay renders activos, postergando cierre...');
+            _resetIdleTimer();
+            return;
+        }
         if (_browser) {
-            console.log('[Puppeteer] Cerrando navegador por inactividad (idle 20s)...');
+            console.log('[Puppeteer] Cerrando navegador por inactividad (idle 30s)...');
             try { await _browser.close(); } catch (_) {}
             _browser = null;
         }
@@ -29,22 +36,28 @@ const getBrowser = async () => {
     if (!_browser || !_browser.connected) {
         console.log('[Puppeteer] Iniciando instancia del navegador...');
 
+        // --single-process se usa SOLO en producción (Render) para ahorrar RAM
+        const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+        const args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--js-flags=--max-old-space-size=128'
+        ];
+        if (isProduction) {
+            args.push('--single-process');
+        }
+
         const options = {
             headless: true,
             pipe: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--js-flags=--max-old-space-size=128'
-            ]
+            args
         };
 
         const possibleCacheDirs = [
@@ -84,7 +97,7 @@ const getBrowser = async () => {
 
         try {
             _browser = await puppeteer.launch(options);
-            console.log('[Puppeteer] Navegador iniciado.');
+            console.log('[Puppeteer] Navegador iniciado' + (isProduction ? ' (single-process)' : '') + '.');
         } catch (error) {
             console.error('[Puppeteer] Error al iniciar:', error.message);
             if (options.executablePath) {
@@ -100,8 +113,15 @@ const getBrowser = async () => {
 };
 
 // Serializa renders: un PDF a la vez → evita picos de RAM
+// Cada tarea es independiente: si una falla, la siguiente puede ejecutarse
 const generarPdf = (fn) => {
-    _renderQueue = _renderQueue.then(() => fn()).catch((err) => { throw err; });
+    _renderQueue = _renderQueue.then(
+        () => { _activeRenders++; return fn(); },
+        () => { _activeRenders++; return fn(); } // recupera cadena rota por error previo
+    ).then(
+        (result) => { _activeRenders--; _resetIdleTimer(); return result; },
+        (err) => { _activeRenders--; _resetIdleTimer(); throw err; }
+    );
     return _renderQueue;
 };
 
@@ -1484,25 +1504,28 @@ exports.generarHojaControlGrupal = async (req, res) => {
         await generarPdf(async () => {
             const browser = await getBrowser();
             const page = await browser.newPage();
-            await page.setContent(htmlCompleto, { waitUntil: "load" });
+            try {
+                await page.setContent(htmlCompleto, { waitUntil: "load", timeout: 30000 });
 
-            const pdfBuffer = await page.pdf({
-                format: "A4",
-                landscape: true,
-                printBackground: true,
-                margin: { top: '20mm', bottom: '15mm', left: '10mm', right: '10mm' }
-            });
+                const pdfBuffer = await page.pdf({
+                    format: "A4",
+                    landscape: true,
+                    printBackground: true,
+                    margin: { top: '20mm', bottom: '15mm', left: '10mm', right: '10mm' },
+                    timeout: 30000
+                });
 
-            await page.close();
-
-            res.setHeader('Content-Type', 'application/pdf');
-            const grupoG = (creditosVisibles[0] || creditos[0])?.miembro?.grupo;
-            const nombreG = grupoG?.nombre || "INDIVIDUAL";
-            const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
-            const estadoGrupoParam = (estadoGrupo && estadoGrupo !== 'N/A') ? `_${estadoGrupo}` : (req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '');
-            const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
-            res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control_${nombreArchivo}${estadoGrupoParam}_ciclo_${ciclo}.pdf"`);
-            res.send(pdfBuffer);
+                res.setHeader('Content-Type', 'application/pdf');
+                const grupoG = (creditosVisibles[0] || creditos[0])?.miembro?.grupo;
+                const nombreG = grupoG?.nombre || "INDIVIDUAL";
+                const nombreArchivo = nombreG.replace(/\D/g, '').length === 0 ? nombreG.replace(/[^a-zA-Z0-9]/g, '_') : nombreG.replace(/\s+/g, '_');
+                const estadoGrupoParam = (estadoGrupo && estadoGrupo !== 'N/A') ? `_${estadoGrupo}` : (req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '');
+                const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
+                res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control_${nombreArchivo}${estadoGrupoParam}_ciclo_${ciclo}.pdf"`);
+                res.send(pdfBuffer);
+            } finally {
+                try { await page.close(); } catch (_) {}
+            }
         });
 
     } catch (error) {
@@ -1994,23 +2017,26 @@ exports.generarHojaControlIndividual = async (req, res) => {
         await generarPdf(async () => {
             const browser = await getBrowser();
             const page = await browser.newPage();
-            await page.setContent(htmlCompleto, { waitUntil: "load" });
+            try {
+                await page.setContent(htmlCompleto, { waitUntil: "load", timeout: 30000 });
 
-            const pdfBuffer = await page.pdf({
-                format: "A4",
-                landscape: false,
-                printBackground: true,
-                margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' }
-            });
+                const pdfBuffer = await page.pdf({
+                    format: "A4",
+                    landscape: false,
+                    printBackground: true,
+                    margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' },
+                    timeout: 30000
+                });
 
-            await page.close();
-
-            res.setHeader('Content-Type', 'application/pdf');
-            const nombreArchivo = nombreCliente.replace(/\D/g, '').length === 0 ? nombreCliente.replace(/[^a-zA-Z0-9]/g, '_') : nombreCliente.replace(/\s+/g, '_');
-            const estadoGrupoParam = (estadoGrupo && estadoGrupo !== 'N/A') ? `_${estadoGrupo}` : (req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '');
-            const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
-            res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control-ind_${nombreArchivo}${estadoGrupoParam}_ciclo_${ciclo}.pdf"`);
-            res.send(pdfBuffer);
+                res.setHeader('Content-Type', 'application/pdf');
+                const nombreArchivo = nombreCliente.replace(/\D/g, '').length === 0 ? nombreCliente.replace(/[^a-zA-Z0-9]/g, '_') : nombreCliente.replace(/\s+/g, '_');
+                const estadoGrupoParam = (estadoGrupo && estadoGrupo !== 'N/A') ? `_${estadoGrupo}` : (req.query.estadoGrupo ? `_${req.query.estadoGrupo}` : '');
+                const disposition = req.query.preview === 'true' ? 'inline' : 'attachment';
+                res.setHeader('Content-Disposition', `${disposition}; filename="hoja-control-ind_${nombreArchivo}${estadoGrupoParam}_ciclo_${ciclo}.pdf"`);
+                res.send(pdfBuffer);
+            } finally {
+                try { await page.close(); } catch (_) {}
+            }
         });
 
     } catch (error) {

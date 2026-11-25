@@ -41,6 +41,43 @@ async function normalizarGrupos(grupos) {
     const coordinaciones = await Coordinacion.find({}, { nombre: 1 }).lean();
     const coordMap = new Map(coordinaciones.map(c => [String(c._id), c]));
 
+    // Calcular cicloActual y ciclosDisponibles reales desde Credito + Miembro en una sola agregación
+    const grupoIds = grupos.map(g => g._id).filter(Boolean);
+    const ciclosPorGrupoMap = new Map();
+    if (grupoIds.length > 0) {
+        try {
+            const agg = await Credito.aggregate([
+                { $match: { miembro: { $ne: null }, estado: { $ne: 'Cancelado' } } },
+                { $lookup: { from: 'miembros', localField: 'miembro', foreignField: '_id', as: 'm', pipeline: [{ $project: { grupo: 1 } }] } },
+                { $unwind: '$m' },
+                { $match: { 'm.grupo': { $in: grupoIds } } },
+                {
+                    $group: {
+                        _id: '$m.grupo',
+                        ciclos: { $addToSet: '$ciclo' },
+                        maxCicloActivo: { $max: { $cond: [{ $eq: ['$estado', 'Activo'] }, '$ciclo', 0] } },
+                        maxCicloTotal: { $max: '$ciclo' }
+                    }
+                }
+            ]);
+            for (const row of agg) {
+                const ciclosValidos = (row.ciclos || [])
+                    .map(Number)
+                    .filter(n => !isNaN(n) && n > 0)
+                    .sort((a, b) => b - a);
+                const cicloActual = row.maxCicloActivo > 0
+                    ? Number(row.maxCicloActivo)
+                    : (row.maxCicloTotal > 0 ? Number(row.maxCicloTotal) : 1);
+                ciclosPorGrupoMap.set(String(row._id), {
+                    cicloActual,
+                    ciclosDisponibles: ciclosValidos.length > 0 ? ciclosValidos : [cicloActual]
+                });
+            }
+        } catch (err) {
+            console.error('[normalizarGrupos] Error calculando ciclos:', err.message);
+        }
+    }
+
     return grupos.map(g => {
         if (g.asesor && typeof g.asesor === 'object') {
             g.asesor.role = normalizarRol(g.asesor.role);
@@ -48,6 +85,11 @@ async function normalizarGrupos(grupos) {
         const gCoordId = extraerIdStr(g.coordinacion) || extraerIdStr(g.asesor?.coordinacion);
         if (gCoordId) {
             g.coordinacion = coordMap.get(gCoordId) || { _id: gCoordId, nombre: g.coordinacion?.nombre || 'Coordinación' };
+        }
+        const cicloInfo = ciclosPorGrupoMap.get(String(g._id));
+        if (cicloInfo) {
+            g.cicloActual = cicloInfo.cicloActual;
+            g.ciclosDisponibles = cicloInfo.ciclosDisponibles;
         }
         return g;
     });
@@ -159,7 +201,7 @@ exports.getGrupos = async (req, res) => {
         // Si es admin o master, query = {} (ve todo)
 
         const gruposRaw = await Grupo.find(query)
-            .select('_id nombre clave diaVisita diaPago horaVisita coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
             .lean();
 
@@ -222,7 +264,7 @@ exports.getGruposPorCoordinacion = async (req, res) => {
         const { coordinacion } = req.params;
         const query = await buildFiltroCoordinacion(coordinacion);
         const gruposRaw = await Grupo.find(query)
-            .select('_id nombre clave diaVisita diaPago horaVisita coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
             .lean();
 
@@ -238,8 +280,8 @@ exports.getGruposPorAsesor = async (req, res) => {
     try {
         const { asesor } = req.params;
         const gruposRaw = await Grupo.find({ asesor: asesor })
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
