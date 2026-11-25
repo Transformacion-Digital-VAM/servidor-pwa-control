@@ -2,3 +2,5 @@
 [2026-11-25 17:09:49.621] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
 [2026-11-25 17:09:49.846] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (167ms)
 [2026-11-25 17:11:50.405] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-11-25 17:38:09.701] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (318ms)
+[2026-11-25 17:45:15.719] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
