@@ -159,9 +159,8 @@ exports.getGrupos = async (req, res) => {
         // Si es admin o master, query = {} (ve todo)
 
         const gruposRaw = await Grupo.find(query)
-            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
+            .select('_id nombre clave diaVisita diaPago horaVisita coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes', '_id nombre apellidos rol ciclo')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
@@ -223,9 +222,8 @@ exports.getGruposPorCoordinacion = async (req, res) => {
         const { coordinacion } = req.params;
         const query = await buildFiltroCoordinacion(coordinacion);
         const gruposRaw = await Grupo.find(query)
-            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
+            .select('_id nombre clave diaVisita diaPago horaVisita coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes', '_id nombre apellidos rol ciclo')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
