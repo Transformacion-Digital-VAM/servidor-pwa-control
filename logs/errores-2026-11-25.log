@@ -1,0 +1,12 @@
+[2026-11-25 17:09:49.621] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length | DETALLES: {} | STACK: RangeError: Invalid string length
+    at JSON.stringify (<anonymous>)
+    at stringify (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\node_modules\express\lib\response.js:1034:12)
+    at ServerResponse.json (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\node_modules\express\lib\response.js:245:14)
+    at exports.getMiembros (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\controllers\miembro.controller.js:111:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[2026-11-25 17:11:50.405] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length | DETALLES: {} | STACK: RangeError: Invalid string length
+    at JSON.stringify (<anonymous>)
+    at stringify (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\node_modules\express\lib\response.js:1034:12)
+    at ServerResponse.json (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\node_modules\express\lib\response.js:245:14)
+    at exports.getMiembros (C:\Users\trans\Documents\SISTEMAS\HOJAS-CONTROL\servidor-pwa-control\controllers\miembro.controller.js:111:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
