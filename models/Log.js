@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logsConnection = require('../config/dbLogs');
 
 const logSchema = new mongoose.Schema({
     accion: {
@@ -44,4 +45,4 @@ const logSchema = new mongoose.Schema({
 logSchema.index({ createdAt: -1, accion: 1 });
 logSchema.index({ createdAt: -1, 'usuario.username': 1 });
 
-module.exports = mongoose.model('Log', logSchema);
+module.exports = logsConnection.model('Log', logSchema);

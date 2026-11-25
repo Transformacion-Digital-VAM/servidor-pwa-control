@@ -21,7 +21,7 @@ if (!fs.existsSync(LOGS_DIR)) {
  */
 function saveLogToDB(logData) {
     try {
-        if (mongoose.connection.readyState === 1) {
+        if (Log.db && Log.db.readyState === 1) {
             Log.create(logData).catch(err => {
                 console.error('[LOGGER-DB] Error al guardar log en MongoDB:', err.message);
             });
