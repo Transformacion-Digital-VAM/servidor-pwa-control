@@ -1,0 +1,6 @@
+[2026-12-02 19:59:37.419] [EXITO] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: CREAR_CREDITOS_MAGICOS] Se registraron 2 crédito(s) mágico(s) para el grupo ROSALINDAS (Campaña 2026-12) | DATOS_ENTRADA: {"grupoId":"6b04b05b726f2e308d88164c","campanaClave":"2026-12","cantidad":2,"ids":["6b1078a9804b0a8248efe8cc","6b1078a9804b0a8248efe8cd"]} | RESULTADO: OK
+[2026-12-02 19:59:37.611] [HTTP] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] POST /api/magicos -> Status: 201 (3135ms)
+[2026-12-02 23:42:03.853] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (1310ms)
+[2026-12-02 23:47:02.913] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-12-02 23:50:51.424] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length
+[2026-12-02 23:54:25.499] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length

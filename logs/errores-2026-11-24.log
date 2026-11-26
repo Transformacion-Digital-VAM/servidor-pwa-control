@@ -1,0 +1,13 @@
+[2026-11-24 19:27:45.106] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: GET_MIEMBROS_ERROR] Error: Invalid string length | DETALLES: {} | STACK: RangeError: Invalid string length
+    at JSON.stringify (<anonymous>)
+    at stringify (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\express\lib\response.js:1034:12)
+    at ServerResponse.json (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\express\lib\response.js:245:14)
+    at exports.getMiembros (C:\Proyectos\pwa-hdcd\servidor-pwa-control\controllers\miembro.controller.js:111:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[2026-11-24 19:56:26.597] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: 127.0.0.1] [ACCION: CREAR_CREDITOS_MAGICOS_ERROR] Error: CreditoMagico validation failed: campanaMes: `11` is not a valid enum value for path `campanaMes`. | DETALLES: {"body":{"grupoId":"6b04b05b726f2e308d88164c","asesorId":"69d66ee16628afe1254d5fca","integrantes":[{"miembroId":"6b04b05c726f2e308d88165c","montoSolicitado":3000,"fechaPrimerPago":"2026-11-24"},{"miembroId":"6b04b05c726f2e308d881658","montoSolicitado":3000,"fechaPrimerPago":"2026-11-24"}]}} | STACK: ValidationError: CreditoMagico validation failed: campanaMes: `11` is not a valid enum value for path `campanaMes`.
+    at Document.invalidate (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\mongoose\lib\document.js:3405:32)
+    at validatePath (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\mongoose\lib\document.js:3177:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Promise.all (index 3)
+    at async model.$__validate (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\mongoose\lib\document.js:3118:3)
+    at async model.validate (C:\Proyectos\pwa-hdcd\servidor-pwa-control\node_modules\mongoose\lib\document.js:2687:5)

@@ -30,8 +30,23 @@ exports.crearCredito = async (req, res) => {
             frecuenciaPago
         } = req.body;
 
-        const porc = porcentajeGarantia !== undefined ? porcentajeGarantia : 10;
-        let garantiaCalculada = garantia !== undefined ? garantia : (montoSolicitado * (porc / 100));
+        const porc = (porcentajeGarantia !== undefined && !isNaN(Number(porcentajeGarantia)))
+            ? Number(porcentajeGarantia)
+            : 10;
+        const montoNum = (montoSolicitado !== undefined && !isNaN(Number(montoSolicitado)))
+            ? Number(montoSolicitado)
+            : 0;
+
+        let garantiaCalculada;
+        if (garantia !== undefined && garantia !== null && garantia !== '' && !isNaN(Number(garantia))) {
+            garantiaCalculada = Number(garantia);
+        } else {
+            garantiaCalculada = montoNum * (porc / 100);
+        }
+
+        if (isNaN(garantiaCalculada)) {
+            garantiaCalculada = 0;
+        }
 
         // --- VALIDACIÓN LÓGICA DE TIPO DE CLIENTE ---
         if (tipoCredito === 'Individual') {
@@ -86,8 +101,12 @@ exports.crearCredito = async (req, res) => {
         }
 
         // Ajuste de garantía solo si efectivamente son 8 semanas y no se especificó garantía fija
-        if (garantia === undefined && (tipoCredito === '8S' || numSemanas === 8)) {
+        if ((garantia === undefined || garantia === null || garantia === '' || isNaN(Number(garantia))) && (tipoCredito === '8S' || numSemanas === 8)) {
             garantiaCalculada = garantiaCalculada * 2;
+        }
+
+        if (isNaN(garantiaCalculada)) {
+            garantiaCalculada = 0;
         }
 
         // Respetar el pagoPactado enviado por el usuario; solo calcular si no viene en el body
@@ -127,7 +146,7 @@ exports.crearCredito = async (req, res) => {
             pagoPactado: pagoPactadoCalc,
             saldoTotal: saldoTotalCalc,
             saldoPendiente: saldoTotalCalc,
-            garantia: garantiaCalculada,
+            garantia: Number(garantiaCalculada) || 0,
             tasaInteres,
             montoSolicitado,
             ahorro: {
@@ -567,9 +586,11 @@ exports.actualizarCredito = async (req, res) => {
             datosActualizar.semanas = semanasNum;
 
             // Garantía sobre el monto solicitado (duplicada para 8S)
-            if (datosActualizar.garantia === undefined) {
-                const garantiaBase = montoSolicitado * (porc / 100);
-                datosActualizar.garantia = garantiaBase * 2;
+            if (datosActualizar.garantia === undefined || isNaN(Number(datosActualizar.garantia))) {
+                const montoActual = Number(montoSolicitado) || 0;
+                const porcActual = Number(porc) || 10;
+                const garantiaBase = montoActual * (porcActual / 100);
+                datosActualizar.garantia = !isNaN(garantiaBase) ? (garantiaBase * 2) : 0;
             }
 
             let pactado8 = (datosActualizar.pagoPactado !== undefined && datosActualizar.pagoPactado !== null && datosActualizar.pagoPactado !== '')
