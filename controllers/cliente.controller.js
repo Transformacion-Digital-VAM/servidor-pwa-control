@@ -70,8 +70,15 @@ exports.getCliente = async (req, res) => {
         const role = normalizarRol(req.user?.role);
         const userId = req.user?.id;
 
-        // 1. Filtrado por asesor explícito en query o por rol
-        if (role === 'coordinador') {
+        // 1. Filtrado estricto por rol primero (asesor y coordinador nunca pueden saltarse su ámbito por query params)
+        if (role === 'asesor') {
+            query = {
+                $or: [
+                    { asesor: userId },
+                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
+                ]
+            };
+        } else if (role === 'coordinador') {
             const coordId = await obtenerCoordinacionId(req.user);
             query = await buildFiltroCoordinacion(coordId, req.query.asesor, req.user?.id);
         } else if (req.query.coordinacion && req.query.coordinacion !== 'todas') {
@@ -83,13 +90,6 @@ exports.getCliente = async (req, res) => {
                 $or: [
                     { asesor: aId },
                     ...(mongoose.Types.ObjectId.isValid(aId) ? [{ asesor: aIdObj }] : [])
-                ]
-            };
-        } else if (role === 'asesor') {
-            query = {
-                $or: [
-                    { asesor: userId },
-                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
                 ]
             };
         }

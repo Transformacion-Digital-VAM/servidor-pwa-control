@@ -252,7 +252,13 @@ exports.getGrupoById = async (req, res) => {
             }
         }
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'GET_GRUPO_BY_ID_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
@@ -278,7 +284,26 @@ exports.getGruposPorCoordinacion = async (req, res) => {
 
 exports.getGruposPorAsesor = async (req, res) => {
     try {
-        const { asesor } = req.params;
+        let { asesor } = req.params;
+        const role = normalizarRol(req.user?.role);
+
+        // Un asesor solo puede consultar sus propios grupos
+        if (role === 'asesor') {
+            if (String(asesor) !== String(req.user.id)) {
+                logWarn(req, 'GET_GRUPOS_ASESOR_DENEGADO', 'Asesor intentó consultar grupos de otro asesor', { asesorSolicitado: asesor, userId: req.user.id });
+                return res.status(403).json({ message: "No tienes permiso para ver grupos de otro asesor" });
+            }
+            asesor = req.user.id;
+        } else if (role === 'coordinador') {
+            const coordId = await obtenerCoordinacionId(req.user);
+            const asesoresCoord = await getAsesoresDeCoordinacion(coordId, req.user.id);
+            const permitido = asesoresCoord.some(id => String(id) === String(asesor)) || String(asesor) === String(req.user.id);
+            if (!permitido) {
+                logWarn(req, 'GET_GRUPOS_ASESOR_DENEGADO', 'Coordinador intentó consultar grupos de asesor fuera de su coordinación', { asesorSolicitado: asesor, userCoord: coordId });
+                return res.status(403).json({ message: "Este asesor no pertenece a tu coordinación" });
+            }
+        }
+
         const gruposRaw = await Grupo.find({ asesor: asesor })
             .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
@@ -338,7 +363,13 @@ exports.updateGrupo = async (req, res) => {
             resultado: datosGrupo
         });
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'ACTUALIZAR_GRUPO_ERROR', error, { id: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
@@ -403,7 +434,13 @@ exports.addMiembroAGrupo = async (req, res) => {
             resultado: datosGrupo
         });
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'AGREGAR_MIEMBRO_GRUPO_ERROR', error, { grupoId: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
@@ -495,7 +532,13 @@ exports.validarGrupo = async (req, res) => {
         grupo.fechaValidacion = validada ? new Date() : null;
         await grupo.save();
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'VALIDAR_GRUPO_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
@@ -507,7 +550,13 @@ exports.obtenerAsesorGrupo = async (req, res) => {
         const { grupoId } = req.params;
         const grupo = await Grupo.findById(grupoId)
             .populate('asesor', 'username nombre role coordinacion');
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

@@ -3,8 +3,76 @@ const Miembro = require('../models/Miembro');
 const Grupo = require('../models/Grupo');
 const Cliente = require('../models/Cliente');
 const { logAccion, logWarn, logError } = require('../utils/loggers');
-const { obtenerCoordinacionId, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
+const { normalizarRol, extraerIdStr, obtenerCoordinacionId, getAsesoresDeCoordinacion, buildFiltroCoordinacion } = require('../helpers/coordinacionHelper');
 const { obtenerDiaSemana } = require('../helpers/fechas');
+
+/**
+ * Verifica que el usuario autenticado tenga permiso para operar sobre un crédito.
+ * - admin / master / superadmin: acceso total.
+ * - asesor: solo créditos de sus propios grupos o clientes individuales.
+ * - coordinador: solo créditos de su coordinación.
+ */
+async function verificarPermisoSobreCredito(req, credito) {
+    if (!req.user) {
+        return { permitido: false, status: 401, msg: 'No autenticado' };
+    }
+    const role = normalizarRol(req.user.role);
+    if (['admin', 'master', 'superadmin'].includes(role)) {
+        return { permitido: true };
+    }
+
+    let grupoDoc = null;
+    let clienteDoc = null;
+
+    if (credito.miembro) {
+        const mId = extraerIdStr(credito.miembro);
+        const miembroDoc = await Miembro.findById(mId).select('grupo').lean();
+        if (miembroDoc?.grupo) {
+            grupoDoc = await Grupo.findById(miembroDoc.grupo).select('asesor coordinacion nombre').lean();
+        }
+    }
+    if (!grupoDoc && credito.cliente) {
+        const cId = extraerIdStr(credito.cliente);
+        clienteDoc = await Cliente.findById(cId).select('asesor coordinacion nombre').lean();
+    }
+
+    const entidad = grupoDoc || clienteDoc;
+    const asesorId = extraerIdStr(entidad?.asesor);
+    const grupoId = grupoDoc ? String(grupoDoc._id) : null;
+
+    if (role === 'asesor') {
+        if (!entidad || !asesorId || asesorId !== String(req.user.id)) {
+            return {
+                permitido: false,
+                status: 403,
+                msg: 'No tienes permiso para operar sobre este crédito porque pertenece a otro asesor'
+            };
+        }
+        return { permitido: true, grupoId };
+    }
+
+    if (role === 'coordinador') {
+        const coordId = await obtenerCoordinacionId(req.user);
+        const userCoordStr = extraerIdStr(coordId);
+        const entCoordStr = extraerIdStr(entidad?.coordinacion);
+        let pertenece = !userCoordStr || (entCoordStr && entCoordStr === userCoordStr) || (asesorId && asesorId === String(req.user.id));
+
+        if (!pertenece && asesorId && userCoordStr) {
+            const asesoresCoord = await getAsesoresDeCoordinacion(userCoordStr, req.user.id);
+            pertenece = asesoresCoord.some(id => String(id) === asesorId);
+        }
+        if (!pertenece) {
+            return {
+                permitido: false,
+                status: 403,
+                msg: 'Este crédito pertenece a otra coordinación'
+            };
+        }
+        return { permitido: true, grupoId };
+    }
+
+    return { permitido: false, status: 403, msg: 'Rol sin permisos para esta operación' };
+}
 
 /** 
  * CRUD DE CREDITOS
@@ -213,11 +281,13 @@ exports.obtenerCreditos = async (req, res) => {
             } catch (e) { }
         }
 
-        // 1. Filtrado por rol del usuario o por parámetros de búsqueda
+        // 1. Filtrado estricto por rol primero (un asesor NUNCA puede saltarse su ámbito con query params)
+        const role = normalizarRol(user?.role);
+        let filtroEntidad = null;
         if (req.query.cliente || req.query.miembro) {
             const entidadId = req.query.cliente || req.query.miembro;
             const idObj = mongoose.Types.ObjectId.isValid(entidadId) ? new mongoose.Types.ObjectId(entidadId) : entidadId;
-            query = {
+            filtroEntidad = {
                 $or: [
                     { cliente: entidadId },
                     { cliente: idObj },
@@ -225,7 +295,40 @@ exports.obtenerCreditos = async (req, res) => {
                     { miembro: idObj }
                 ]
             };
-        } else if (user && user.role && user.role.toLowerCase() === 'coordinador') {
+        }
+
+        if (role === 'asesor') {
+            const userId = user.id;
+            const asesorIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
+
+            const [gruposAsesor, clientesAsesor] = await Promise.all([
+                Grupo.find({
+                    $or: [
+                        { asesor: userId },
+                        ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: asesorIdObj }] : [])
+                    ]
+                }).select('_id').lean(),
+                Cliente.find({
+                    $or: [
+                        { asesor: userId },
+                        ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: asesorIdObj }] : [])
+                    ]
+                }).select('_id').lean()
+            ]);
+
+            const grupoIds = gruposAsesor.map(g => g._id);
+            const miembros = await Miembro.find({ grupo: { $in: grupoIds } }).select('_id').lean();
+            const miembroIds = miembros.map(m => m._id);
+            const clienteIds = clientesAsesor.map(c => c._id);
+
+            const filtroAsesor = {
+                $or: [
+                    { miembro: { $in: miembroIds } },
+                    { cliente: { $in: clienteIds } }
+                ]
+            };
+            query = filtroEntidad ? { $and: [filtroAsesor, filtroEntidad] } : filtroAsesor;
+        } else if (role === 'coordinador') {
             const coordId = await obtenerCoordinacionId(user);
             const filtroGrupos = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
             const filtroClientes = await buildFiltroCoordinacion(coordId, req.query.asesor, user.id);
@@ -240,12 +343,15 @@ exports.obtenerCreditos = async (req, res) => {
             const miembroIds = miembros.map(m => m._id);
             const clienteIds = clientesCoord.map(c => c._id);
 
-            query = {
+            const filtroCoord = {
                 $or: [
                     { miembro: { $in: miembroIds } },
                     { cliente: { $in: clienteIds } }
                 ]
             };
+            query = filtroEntidad ? { $and: [filtroCoord, filtroEntidad] } : filtroCoord;
+        } else if (filtroEntidad) {
+            query = filtroEntidad;
         } else if (req.query.tipoCredito === 'Individual') {
             if (req.query.asesor && req.query.asesor !== 'todos') {
                 const aId = req.query.asesor;
@@ -525,6 +631,12 @@ exports.actualizarCredito = async (req, res) => {
             });
         }
 
+        const permiso = await verificarPermisoSobreCredito(req, creditoOriginal);
+        if (!permiso.permitido) {
+            logWarn(req, 'ACTUALIZAR_CREDITO_DENEGADO', permiso.msg, { id, userId: req.user?.id });
+            return res.status(permiso.status).json({ ok: false, msg: permiso.msg });
+        }
+
         const datosActualizar = { ...req.body };
         delete datosActualizar.pagos;
 
@@ -700,6 +812,12 @@ exports.cancelarCreditoJustificado = async (req, res) => {
             });
         }
 
+        const permiso = await verificarPermisoSobreCredito(req, credito);
+        if (!permiso.permitido) {
+            logWarn(req, 'CANCELAR_CREDITO_DENEGADO', permiso.msg, { id, userId: req.user?.id });
+            return res.status(permiso.status).json({ ok: false, msg: permiso.msg });
+        }
+
         const saldoAnterior = credito.saldoPendiente;
         const motivoTexto = motivo || 'CANCELACION_REFILL';
         const justificacionFinal = justificacion || (motivo === 'CAMBIO_CICLO' ? 'Cancelación por Cambio de Ciclo' : 'Cancelación por Refill');
@@ -771,6 +889,38 @@ exports.registrarPago = async (req, res) => {
         if (!creditoOrigen) {
             logWarn(req, 'REGISTRAR_PAGO_ORIGEN_NOT_FOUND', 'Crédito de origen no encontrado para registrar pago', { id, body: req.body });
             return res.status(404).json({ ok: false, msg: 'Crédito de origen no encontrado' });
+        }
+
+        const permiso = await verificarPermisoSobreCredito(req, creditoOrigen);
+        if (!permiso.permitido) {
+            logWarn(req, 'REGISTRAR_PAGO_DENEGADO', permiso.msg, { creditoId: id, userId: req.user?.id });
+            return res.status(permiso.status).json({ ok: false, msg: permiso.msg });
+        }
+
+        // Si es pago solidario grupal, verificar que los beneficiarios pertenezcan al MISMO grupo que el crédito origen
+        if (pagoSolidario && creditoOrigen.miembro && permiso.grupoId) {
+            const idsBeneficiarios = [];
+            if (beneficiarioFinal) idsBeneficiarios.push(extraerIdStr(beneficiarioFinal));
+            if (Array.isArray(beneficiariosSolidarios)) {
+                for (const b of beneficiariosSolidarios) {
+                    const bId = extraerIdStr(b?.miembro || b?.id || b);
+                    if (bId) idsBeneficiarios.push(bId);
+                }
+            }
+            const idsUnicos = [...new Set(idsBeneficiarios.filter(Boolean))];
+            if (idsUnicos.length > 0) {
+                const miembrosBenef = await Miembro.find({ _id: { $in: idsUnicos } }).select('grupo').lean();
+                const ajeno = miembrosBenef.find(m => String(m.grupo) !== String(permiso.grupoId));
+                if (ajeno) {
+                    logWarn(req, 'PAGO_SOLIDARIO_GRUPO_DISTINTO', 'Intento de aplicar pago solidario a miembro de otro grupo', {
+                        creditoId: id, grupoOrigen: permiso.grupoId, miembroAjeno: ajeno._id, grupoAjeno: ajeno.grupo
+                    });
+                    return res.status(403).json({
+                        ok: false,
+                        msg: 'El beneficiario del pago solidario no pertenece al mismo grupo que el crédito de origen'
+                    });
+                }
+            }
         }
 
         let montoCreditoNum = Number(montoPagado) || 0;
@@ -1323,6 +1473,12 @@ exports.registrarAbonoGarantia = async (req, res) => {
             });
         }
 
+        const permiso = await verificarPermisoSobreCredito(req, credito);
+        if (!permiso.permitido) {
+            logWarn(req, 'ABONO_GARANTIA_DENEGADO', permiso.msg, { id, userId: req.user?.id });
+            return res.status(permiso.status).json({ ok: false, msg: permiso.msg });
+        }
+
         if (monto <= 0) {
             logWarn(req, 'ABONO_GARANTIA_MONTO_INVALIDO', 'El monto de garantía debe ser mayor a 0', { id, monto });
             return res.status(400).json({
@@ -1734,6 +1890,12 @@ exports.registrarAhorro = async (req, res) => {
                 ok: false,
                 msg: 'Crédito no encontrado'
             });
+        }
+
+        const permiso = await verificarPermisoSobreCredito(req, credito);
+        if (!permiso.permitido) {
+            logWarn(req, 'REGISTRAR_AHORRO_DENEGADO', permiso.msg, { id, userId: req.user?.id });
+            return res.status(permiso.status).json({ ok: false, msg: permiso.msg });
         }
 
         if (monto <= 0) {

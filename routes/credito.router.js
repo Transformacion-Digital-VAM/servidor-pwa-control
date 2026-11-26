@@ -4,26 +4,26 @@ const creditoController = require('../controllers/credito.controller');
 const hcontrolController = require('../controllers/hcontrol.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 
-router.post('/', creditoController.crearCredito); //verifyToken
-router.get('/', creditoController.obtenerCreditos); //verifyToken
-router.get('/pagos-con-ubicacion', creditoController.getPagosConUbicacion); //verifyToken — ANTES de /:id
-router.get('/:id', creditoController.obtenerCreditoPorId); //verifyToken
-router.put('/:id', creditoController.actualizarCredito); //verifyToken
-router.put('/:id/cancelar-justificado', creditoController.cancelarCreditoJustificado); //verifyToken
-router.delete('/:id', creditoController.eliminarCredito); //verifyToken
+router.post('/', verifyToken, creditoController.crearCredito);
+router.get('/', verifyToken, creditoController.obtenerCreditos);
+router.get('/pagos-con-ubicacion', verifyToken, creditoController.getPagosConUbicacion); // ANTES de /:id
+router.get('/:id', verifyToken, creditoController.obtenerCreditoPorId);
+router.put('/:id', verifyToken, creditoController.actualizarCredito);
+router.put('/:id/cancelar-justificado', verifyToken, creditoController.cancelarCreditoJustificado);
+router.delete('/:id', verifyToken, creditoController.eliminarCredito);
 
 // PAGOS
-router.post('/:id/pagos', creditoController.registrarPago); //verifyToken
-// router.post('/:id/refill', creditoController.convertirARefill); //verifyToken
-router.post('/:id/garantia', creditoController.registrarAbonoGarantia); //verifyToken
+router.post('/:id/pagos', verifyToken, creditoController.registrarPago);
+// router.post('/:id/refill', verifyToken, creditoController.convertirARefill);
+router.post('/:id/garantia', verifyToken, creditoController.registrarAbonoGarantia);
 
 
 //GARANTIAS
-//router.post('/:id/garantia', creditoController.registrarGarantia); //verifyToken
+//router.post('/:id/garantia', verifyToken, creditoController.registrarGarantia);
 
 
 //AHORRO
-router.post('/:id/ahorro', creditoController.registrarAhorro); //verifyToken
+router.post('/:id/ahorro', verifyToken, creditoController.registrarAhorro);
 
 
 //Hoja de control
