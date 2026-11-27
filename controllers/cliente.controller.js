@@ -70,8 +70,15 @@ exports.getCliente = async (req, res) => {
         const role = normalizarRol(req.user?.role);
         const userId = req.user?.id;
 
-        // 1. Filtrado por asesor explícito en query o por rol
-        if (role === 'coordinador') {
+        // 1. Filtrado estricto por rol primero (asesor y coordinador nunca pueden saltarse su ámbito por query params)
+        if (role === 'asesor') {
+            query = {
+                $or: [
+                    { asesor: userId },
+                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
+                ]
+            };
+        } else if (role === 'coordinador') {
             const coordId = await obtenerCoordinacionId(req.user);
             query = await buildFiltroCoordinacion(coordId, req.query.asesor, req.user?.id);
         } else if (req.query.coordinacion && req.query.coordinacion !== 'todas') {
@@ -83,13 +90,6 @@ exports.getCliente = async (req, res) => {
                 $or: [
                     { asesor: aId },
                     ...(mongoose.Types.ObjectId.isValid(aId) ? [{ asesor: aIdObj }] : [])
-                ]
-            };
-        } else if (role === 'asesor') {
-            query = {
-                $or: [
-                    { asesor: userId },
-                    ...(mongoose.Types.ObjectId.isValid(userId) ? [{ asesor: new mongoose.Types.ObjectId(userId) }] : [])
                 ]
             };
         }
@@ -351,8 +351,10 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
         };
 
         const creditosInd = await Credito.find(creditoQuery)
+            .select('_id cliente ciclo semanaActual montoSolicitado pagoPactado saldoPendiente estado')
             .populate({
                 path: 'cliente',
+                select: 'nombre grupo diaPago tipoPago asesor coordinacion',
                 populate: [
                     { path: 'asesor', select: 'username nombre role coordinacion' },
                     { path: 'coordinacion', select: 'nombre' }
@@ -369,18 +371,18 @@ exports.getMiembrosGrupoConCreditoIndividual = async (req, res) => {
                 return true;
             });
 
-        // Detectar si algún clienre tiene ObjectId en el campo grupo para buscar su nombre
+        // Detectar si algún cliente tiene ObjectId en el campo grupo para buscar su nombre
         const grupoIds = [];
         for (const c of creditosFiltrados) {
             const g = c.cliente?.grupo?.trim();
-            if (g && /^[0-9a-fA-D]{24}$/.test(g)) {
+            if (g && /^[0-9a-fA-F]{24}$/.test(g)) {
                 grupoIds.push(g);
             }
         }
 
         const gruposMap = new Map();
         if (grupoIds.length > 0) {
-            const gruposDocs = await Grupo.find({ _id: { $in: grupoIds } }).select('id_nombre').lean();
+            const gruposDocs = await Grupo.find({ _id: { $in: grupoIds } }).select('_id nombre').lean();
             for (const gr of gruposDocs) {
                 gruposMap.set(String(gr._id), gr.nombre);
             }

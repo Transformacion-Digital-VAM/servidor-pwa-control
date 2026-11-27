@@ -34,6 +34,18 @@ exports.createMiembro = async (req, res) => {
             return res.status(404).json({ msg: 'Grupo no encontrado' });
         }
 
+        // Evitar duplicados (p. ej. reintentos de cola offline / syncQueue)
+        const nombreTrim = String(nombre || '').trim();
+        const apellidosTrim = String(apellidos || '').trim();
+        const miembroExistente = await Miembro.findOne({
+            grupo,
+            nombre: new RegExp(`^${nombreTrim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'),
+            apellidos: new RegExp(`^${apellidosTrim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')
+        });
+        if (miembroExistente) {
+            return res.status(200).json(miembroExistente);
+        }
+
         const nuevoMiembro = new Miembro({
             nombre,
             apellidos,
@@ -107,7 +119,9 @@ exports.getMiembros = async (req, res) => {
             }
         }
 
-        const miembros = await Miembro.find(query).populate('grupo').lean();
+        const miembros = await Miembro.find(query)
+            .select('_id nombre apellidos rol grupo ciclo')
+            .lean();
         res.status(200).json(miembros);
     } catch (error) {
         logError(req, 'GET_MIEMBROS_ERROR', error);

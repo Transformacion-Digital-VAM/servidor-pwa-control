@@ -41,6 +41,43 @@ async function normalizarGrupos(grupos) {
     const coordinaciones = await Coordinacion.find({}, { nombre: 1 }).lean();
     const coordMap = new Map(coordinaciones.map(c => [String(c._id), c]));
 
+    // Calcular cicloActual y ciclosDisponibles reales desde Credito + Miembro en una sola agregación
+    const grupoIds = grupos.map(g => g._id).filter(Boolean);
+    const ciclosPorGrupoMap = new Map();
+    if (grupoIds.length > 0) {
+        try {
+            const agg = await Credito.aggregate([
+                { $match: { miembro: { $ne: null }, estado: { $ne: 'Cancelado' } } },
+                { $lookup: { from: 'miembros', localField: 'miembro', foreignField: '_id', as: 'm', pipeline: [{ $project: { grupo: 1 } }] } },
+                { $unwind: '$m' },
+                { $match: { 'm.grupo': { $in: grupoIds } } },
+                {
+                    $group: {
+                        _id: '$m.grupo',
+                        ciclos: { $addToSet: '$ciclo' },
+                        maxCicloActivo: { $max: { $cond: [{ $eq: ['$estado', 'Activo'] }, '$ciclo', 0] } },
+                        maxCicloTotal: { $max: '$ciclo' }
+                    }
+                }
+            ]);
+            for (const row of agg) {
+                const ciclosValidos = (row.ciclos || [])
+                    .map(Number)
+                    .filter(n => !isNaN(n) && n > 0)
+                    .sort((a, b) => b - a);
+                const cicloActual = row.maxCicloActivo > 0
+                    ? Number(row.maxCicloActivo)
+                    : (row.maxCicloTotal > 0 ? Number(row.maxCicloTotal) : 1);
+                ciclosPorGrupoMap.set(String(row._id), {
+                    cicloActual,
+                    ciclosDisponibles: ciclosValidos.length > 0 ? ciclosValidos : [cicloActual]
+                });
+            }
+        } catch (err) {
+            console.error('[normalizarGrupos] Error calculando ciclos:', err.message);
+        }
+    }
+
     return grupos.map(g => {
         if (g.asesor && typeof g.asesor === 'object') {
             g.asesor.role = normalizarRol(g.asesor.role);
@@ -48,6 +85,11 @@ async function normalizarGrupos(grupos) {
         const gCoordId = extraerIdStr(g.coordinacion) || extraerIdStr(g.asesor?.coordinacion);
         if (gCoordId) {
             g.coordinacion = coordMap.get(gCoordId) || { _id: gCoordId, nombre: g.coordinacion?.nombre || 'Coordinación' };
+        }
+        const cicloInfo = ciclosPorGrupoMap.get(String(g._id));
+        if (cicloInfo) {
+            g.cicloActual = cicloInfo.cicloActual;
+            g.ciclosDisponibles = cicloInfo.ciclosDisponibles;
         }
         return g;
     });
@@ -78,6 +120,32 @@ exports.createGrupo = async (req, res) => {
             req.body.diaPago = diaFinal;
         }
 
+        // Si ya existe un grupo con esa clave, reutilizarlo y actualizarlo en vez de fallar con E11000 duplicate key
+        const claveTrim = req.body.clave ? String(req.body.clave).trim() : null;
+        if (claveTrim) {
+            const grupoExistente = await Grupo.findOne({ clave: claveTrim });
+            if (grupoExistente) {
+                const grupoActualizado = await Grupo.findByIdAndUpdate(
+                    grupoExistente._id,
+                    { $set: req.body },
+                    { new: true }
+                );
+                if (diaFinal) {
+                    await Cliente.updateMany(
+                        { $or: [{ grupo: String(grupoExistente._id) }, { grupo: grupoActualizado.nombre }] },
+                        { $set: { diaPago: diaFinal, diaVisita: diaFinal } }
+                    );
+                }
+                const datosGrupo = formatGrupoData(grupoActualizado);
+                logAccion(req, 'REUTILIZAR_GRUPO_EXISTENTE', {
+                    descripcion: `Grupo existente reutilizado por clave "${claveTrim}": "${grupoActualizado.nombre}"`,
+                    datos: req.body,
+                    resultado: datosGrupo
+                });
+                return res.status(200).json(grupoActualizado);
+            }
+        }
+
         const grupo = new Grupo(req.body);
         await grupo.save();
 
@@ -91,6 +159,22 @@ exports.createGrupo = async (req, res) => {
 
         res.status(201).json(grupo);
     } catch (error) {
+        if (error.code === 11000 && req.body.clave) {
+            try {
+                const claveTrim = String(req.body.clave).trim();
+                const grupoExistente = await Grupo.findOne({ clave: claveTrim });
+                if (grupoExistente) {
+                    const grupoActualizado = await Grupo.findByIdAndUpdate(
+                        grupoExistente._id,
+                        { $set: req.body },
+                        { new: true }
+                    );
+                    return res.status(200).json(grupoActualizado);
+                }
+            } catch (innerErr) {
+                // continuar al log de error general
+            }
+        }
         logError(req, 'CREAR_GRUPO_ERROR', error, { body: req.body });
         res.status(500).json({ message: error.message });
     }
@@ -117,8 +201,8 @@ exports.getGrupos = async (req, res) => {
         // Si es admin o master, query = {} (ve todo)
 
         const gruposRaw = await Grupo.find(query)
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
@@ -168,7 +252,13 @@ exports.getGrupoById = async (req, res) => {
             }
         }
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'GET_GRUPO_BY_ID_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
@@ -180,8 +270,8 @@ exports.getGruposPorCoordinacion = async (req, res) => {
         const { coordinacion } = req.params;
         const query = await buildFiltroCoordinacion(coordinacion);
         const gruposRaw = await Grupo.find(query)
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
@@ -194,10 +284,29 @@ exports.getGruposPorCoordinacion = async (req, res) => {
 
 exports.getGruposPorAsesor = async (req, res) => {
     try {
-        const { asesor } = req.params;
+        let { asesor } = req.params;
+        const role = normalizarRol(req.user?.role);
+
+        // Un asesor solo puede consultar sus propios grupos
+        if (role === 'asesor') {
+            if (String(asesor) !== String(req.user.id)) {
+                logWarn(req, 'GET_GRUPOS_ASESOR_DENEGADO', 'Asesor intentó consultar grupos de otro asesor', { asesorSolicitado: asesor, userId: req.user.id });
+                return res.status(403).json({ message: "No tienes permiso para ver grupos de otro asesor" });
+            }
+            asesor = req.user.id;
+        } else if (role === 'coordinador') {
+            const coordId = await obtenerCoordinacionId(req.user);
+            const asesoresCoord = await getAsesoresDeCoordinacion(coordId, req.user.id);
+            const permitido = asesoresCoord.some(id => String(id) === String(asesor)) || String(asesor) === String(req.user.id);
+            if (!permitido) {
+                logWarn(req, 'GET_GRUPOS_ASESOR_DENEGADO', 'Coordinador intentó consultar grupos de asesor fuera de su coordinación', { asesorSolicitado: asesor, userCoord: coordId });
+                return res.status(403).json({ message: "Este asesor no pertenece a tu coordinación" });
+            }
+        }
+
         const gruposRaw = await Grupo.find({ asesor: asesor })
+            .select('_id nombre clave diaVisita diaPago horaVisita integrantes coordinacion asesor validada validadaPor fechaValidacion createdAt updatedAt')
             .populate('asesor', 'username nombre role coordinacion')
-            .populate('integrantes')
             .lean();
 
         const grupos = await normalizarGrupos(gruposRaw);
@@ -254,7 +363,13 @@ exports.updateGrupo = async (req, res) => {
             resultado: datosGrupo
         });
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'ACTUALIZAR_GRUPO_ERROR', error, { id: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
@@ -319,7 +434,13 @@ exports.addMiembroAGrupo = async (req, res) => {
             resultado: datosGrupo
         });
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'AGREGAR_MIEMBRO_GRUPO_ERROR', error, { grupoId: req.params.id, body: req.body });
         res.status(500).json({ message: error.message });
@@ -411,7 +532,13 @@ exports.validarGrupo = async (req, res) => {
         grupo.fechaValidacion = validada ? new Date() : null;
         await grupo.save();
 
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         logError(req, 'VALIDAR_GRUPO_ERROR', error, { id: req.params.id });
         res.status(500).json({ message: error.message });
@@ -423,7 +550,13 @@ exports.obtenerAsesorGrupo = async (req, res) => {
         const { grupoId } = req.params;
         const grupo = await Grupo.findById(grupoId)
             .populate('asesor', 'username nombre role coordinacion');
-        res.status(200).json(grupo);
+        const grupoObj = grupo.toObject();
+        const miembroIds = (grupoObj.integrantes || []).map(m => m._id || m);
+        const creditosGrupo = miembroIds.length > 0
+            ? await Credito.find({ miembro: { $in: miembroIds } }).lean()
+            : [];
+
+        res.status(200).json({ ...grupoObj, creditos: creditosGrupo });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

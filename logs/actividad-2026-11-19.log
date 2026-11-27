@@ -1,0 +1,6 @@
+[2026-11-19 19:20:34.626] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (279ms)
+[2026-11-19 21:46:07.194] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_CLIENTES_ERROR] Error: getaddrinfo ENOTFOUND ac-opm1wqn-shard-00-00.kaydypd.mongodb.net
+[2026-11-19 21:46:07.597] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_GRUPOS_ERROR] Error: getaddrinfo ENOTFOUND ac-opm1wqn-shard-00-00.kaydypd.mongodb.net
+[2026-11-19 21:46:07.883] [ERROR] [Usuario: admin | Rol: admin | ID: 69a0ad50508277d4570c36d2 | IP: Desconocida] [ACCION: GET_MIEMBROS_GRUPO_CON_CREDITO_INDIVIDUAL_ERROR] Error: getaddrinfo ENOTFOUND ac-opm1wqn-shard-00-00.kaydypd.mongodb.net
+[2026-11-19 23:43:31.071] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (313ms)
+[2026-11-20 00:02:49.668] [HTTP] [Usuario: ANONIMO/SIN_TOKEN | IP: 127.0.0.1] POST /api/users/login -> Status: 200 (300ms)

@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js",
+    "start": "node --max-old-space-size=256 index.js",
     "dev": "nodemon .",
     "postinstall": "PUPPETEER_CACHE_DIR=./.puppeteer-cache npx puppeteer browsers install chrome"
   },
@@ -29,3 +29,4 @@
     "nodemon": "^3.1.14"
   }
 }
+
